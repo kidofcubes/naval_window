@@ -1,0 +1,26 @@
+[package]
+name = "naval_window"
+version = "0.1.0"
+edition = "2024"
+resolver = "2"
+
+[dependencies]
+naval_sketch = { path = "../naval_sketch/crates/naval_sketch", features = ["bevy"] }
+bevy = { version = "0.18.0", features = ["dynamic_linking", "wayland", "debug", "hotpatching"]}
+dioxus-devtools = "0.7.3" #included to fix the version because this is used in bevy's hotpatching
+anyhow = {  version = "1.0.101" , features = ["backtrace"]}
+dirs = "6.0.0"
+
+
+# Enable max optimizations for dependencies, but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
+
+# Enable only a small amount of optimization in debug mode
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 'z'
