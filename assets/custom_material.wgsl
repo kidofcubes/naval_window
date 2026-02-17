@@ -2,6 +2,9 @@
 #import bevy_pbr::{mesh_functions::{get_world_from_local, mesh_position_local_to_clip, mesh_position_local_to_world}}
 // we can import items from shader modules in the assets folder with a quoted path
 //#import "shaders/custom_material_import.wgsl"::COLOR_MULTIPLIER
+
+//for time since startup
+//#import bevy_pbr::{mesh_view_bindings::globals}
 //// this is made available to the importing module
 const COLOR_MULTIPLIER: vec4<f32> = vec4<f32>(1.0, 1.0, 1.0, 0.5);
 
@@ -24,18 +27,29 @@ struct VertexOutput {
 //@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material_color: vec4<f32>;
 //@group(#{MATERIAL_BIND_GROUP}) @binding(1) var material_color_texture: texture_2d<f32>;
 //@group(#{MATERIAL_BIND_GROUP}) @binding(2) var material_color_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> time: f32;
 
 const PI = 3.1415926538;
+const TAU = PI * 2;
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
 
 //    // Transform local position to clip space (screen space)
+    var timeMult = time * 1.0;
+    var offset: vec3<f32> = vec3<f32>(
+        0.0,
+//        100.0+sin((timeMult+vertex.uv.x)*TAU)+cos((timeMult+vertex.uv.z)*TAU),
+        100.0+(1.0*(sin((timeMult+(vertex.uv.x*10.0))*TAU)+cos((timeMult+(vertex.uv.y*10.0))*TAU))),
+//        100.0+timeMult,
+        0.0
+    );
+
     out.clip_position = mesh_position_local_to_clip(
         get_world_from_local(vertex.instance_index),
 //        vec4<f32>(vertex.position + vec3<f32>(0.0,sin(vertex.uv.x*5), 0.0), 1.0)
-        vec4<f32>(vertex.position + vec3<f32>(0.0,2+sin(vertex.uv.x*2*PI)+sin(vertex.uv.y*2*PI),0.0), 1.0)
+        vec4<f32>(vertex.position + offset, 1.0)
     );
     out.uv = vertex.uv;
 //    out.blend_color = vec4<f32>(0.5,0.5,0.5, 0.5);

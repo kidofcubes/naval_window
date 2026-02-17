@@ -1,4 +1,6 @@
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::primitives::Aabb;
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, MeshVertexAttribute, MeshVertexBufferLayoutRef, PrimitiveTopology, VertexFormat};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
@@ -14,23 +16,28 @@ const ATTRIBUTE_BLEND_COLOR: MeshVertexAttribute =
 pub struct WaterPlugin;
 impl Plugin for WaterPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<CustomMaterial>::default());
+        app.add_plugins(MaterialPlugin::<CustomMaterial>{
+            ..default()
+        });
         app.add_systems(Startup, setup);
+        app.add_systems(Update, update);
     }
 }
+
 
 /// set up a simple 3D scene
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<CustomMaterial>>,
+    mut custom_materials: ResMut<Assets<CustomMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
     // let mesh = Mesh::from(Plane3d {
     //         half_size: Vec2::new(50.0, 50.0),
     //         normal: Dir3::Y,
     //     });
-    let mesh = generate_dense_plane(Vec3::new(0.0, 1.0, 0.0), 10, 1.0, 1.0, 0.0,0.0);
+    let mesh = generate_dense_plane(Vec3::new(0.0, 1.0, 0.0), 100, 100.0, 100.0, -50.0,-50.0);
         // Sets the custom attribute
         // .with_inserted_attribute(
         //     ATTRIBUTE_BLEND_COLOR,
@@ -39,21 +46,41 @@ fn setup(
         // );
 
     // cube
+    // commands.spawn((
+    //     Mesh3d(meshes.add(Cuboid::default())),
+    //     MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
+    //     Transform::from_xyz(0.0, 0.0, 0.0),
+    // ));
+
+
     commands.spawn((
         Mesh3d(meshes.add(mesh)),
-        MeshMaterial3d(materials.add(CustomMaterial {
+        MeshMaterial3d(custom_materials.add(CustomMaterial {
             // color: LinearRgba::BLUE,
             // color_texture: Some(asset_server.load("yuyuchonk.png")),
             // alpha_mode: AlphaMode::Blend,
+            time: 0.0,
         })),
+        NoFrustumCulling,
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
 }
 
+fn update(
+    mut materials: ResMut<Assets<CustomMaterial>>,
+    time: Res<Time>,
+){
+    for (_, mut material) in materials.iter_mut() {
+        // material.time = (time.elapsed().as_nanos() / (1000u128 * 1000u128 * 1000u128)) as f32;
+        material.time = (time.elapsed().as_millis() as f32 / 1000.0) as f32;
+    }
+}
 
 // This struct defines the data that will be passed to your shader
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct CustomMaterial {
+    #[uniform(0)]
+    time: f32,
     // #[uniform(0)]
     // color: LinearRgba,
     // #[texture(1)]
@@ -68,6 +95,9 @@ impl Material for CustomMaterial {
     fn vertex_shader() -> ShaderRef {
         SHADER_ASSET_PATH.into()
     }
+    // fn prepass_vertex_shader() -> ShaderRef {
+    //     SHADER_ASSET_PATH.into()
+    // }
     fn fragment_shader() -> ShaderRef {
         SHADER_ASSET_PATH.into()
     }
@@ -94,6 +124,7 @@ impl Material for CustomMaterial {
 
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
+        descriptor.primitive.cull_mode = None;
         Ok(())
     }
 
@@ -119,9 +150,9 @@ pub fn generate_dense_plane(
     for x in 0..(resolution+1) {
         for z in 0..(resolution+1) {
             vertices.push([
-                x as f32 * (x_scale) + x_offset,
-                0f32,
-                z as f32 * (z_scale) + z_offset
+                (x as f32 * (x_scale/(resolution as f32))) + x_offset,
+                -100.0f32,
+                (z as f32 * (z_scale/(resolution as f32))) + z_offset
             ]);
             uv.push([
                 x as f32 / (resolution as f32),
