@@ -1,5 +1,6 @@
 mod cam_movement;
 mod water;
+mod voxelize;
 
 use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, window::WindowResolution};
 use std::{env, path::{Path, PathBuf}};
@@ -9,6 +10,7 @@ use naval_sketch::bevy_plugin::{argb_slice_to_color, place_part, BasePartMesh, N
 use naval_sketch::parsing::{load_save};
 use naval_sketch::parts::{AdjustableHull, BasePart, Part, PartRegistry};
 use naval_sketch::parts_loader::LocalPaths;
+use crate::voxelize::{render_voxel_grid, voxelize_meshes, VoxelGrid, VoxelizationConfig};
 use crate::cam_movement::CameraMovementPlugin;
 use crate::water::WaterPlugin;
 
@@ -17,7 +19,7 @@ fn temp_test_update(
     mut meshes: ResMut<Assets<Mesh>>,
     key: Res<ButtonInput<KeyCode>>,
     // mut query: Query<(Entity, &mut Mesh3d, &mut MeshMaterial3d<StandardMaterial>, &BasePartMesh)>,
-    all_renderers: Query<&Mesh3d>,
+    all_renderers: Query<(&Mesh3d, &GlobalTransform), With<BasePartMesh>>,
     hull_query: Query<(Entity, &BasePart, &mut AdjustableHull)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut build_data: ResMut<BuildData>,
@@ -25,8 +27,8 @@ fn temp_test_update(
     parent_query: Query<&ChildOf>,
     base_part_query: Query<(Entity, &BasePart)>,
     mut transform_query: Query<&mut Transform>,
-    commands: Commands,
-    gizmo: Gizmos
+    mut commands: Commands,
+    mut gizmos: Gizmos
 ) {
     // if key.just_pressed(KeyCode::KeyH) {
     //     let hovered_mat = StandardMaterial::from_color(Color::WHITE);
@@ -58,11 +60,45 @@ fn temp_test_update(
     if key.pressed(KeyCode::KeyG){
         let mut total_triangles = 0;
         for mesh_handle in all_renderers.iter() {
-            if let Some(mesh) = meshes.get(mesh_handle) && let Some(indices) = mesh.indices(){
+            if let Some(mesh) = meshes.get(mesh_handle.0) && let Some(indices) = mesh.indices(){
                 total_triangles += indices.len() / 3;
             }
         }
         info!("TOTAL TRIANGLES {}",total_triangles);
+    }
+    
+    // Test voxelization functionality
+    if key.just_pressed(KeyCode::KeyV) {
+        info!("Running voxelization test...");
+        
+        // Collect all mesh references for voxelization
+        let mesh_refs: Vec<(&Mesh, &GlobalTransform)> = all_renderers
+            .iter()
+            .filter_map(|x| Some((meshes.get(x.0).unwrap(), x.1)))
+            .collect();
+            
+        if !mesh_refs.is_empty() {
+            // Configure voxelization
+            let config = VoxelizationConfig {
+                resolution: 64,
+                min_voxel_size: Some(0.25),
+                max_voxel_size: Some(0.5),
+            };
+            
+            // Voxelize the meshes
+            let voxel_grid = voxelize_meshes(mesh_refs, config);
+            info!("Created voxel grid with dimensions: {:?}", voxel_grid.dimensions);
+            info!("Voxel size: {}", voxel_grid.voxel_size);
+            build_data.voxel_grid = Some(voxel_grid);
+        } else {
+            warn!("No meshes found for voxelization");
+        }
+    }
+
+    if(key.pressed(KeyCode::KeyB)){
+        if let Some(voxel_grid) = &build_data.voxel_grid {
+            render_voxel_grid(&voxel_grid, &mut gizmos);
+        }
     }
 }
 
@@ -80,7 +116,8 @@ struct InitData {
 
 #[derive(Resource)]
 struct BuildData{
-    root_ship_entity: Option<Entity>
+    root_ship_entity: Option<Entity>,
+    voxel_grid: Option<VoxelGrid>,
 }
 
 
@@ -296,6 +333,7 @@ fn main() {
         })
         .insert_resource(BuildData{
             root_ship_entity: None,
+            voxel_grid: None,
         })
         .add_plugins((
             // WebAssetPlugin,
