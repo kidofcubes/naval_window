@@ -47,7 +47,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var offset: vec3<f32> = vec3<f32>(
         0.0,
 //        100.0+sin((timeMult+vertex.uv.x)*TAU)+cos((timeMult+vertex.uv.z)*TAU),
-        0.0+(1.0*(sin((timeMult+(vertex.uv.x*10.0))*TAU)+cos((timeMult+(vertex.uv.y*10.0))*TAU))),
+        0.0+(5.0*0.5*(sin((timeMult+(vertex.uv.x*10.0))*TAU)+cos((timeMult+(vertex.uv.y*10.0))*TAU))),
+//        1.3+(0.0*(sin((timeMult+(vertex.uv.x*10.0))*TAU)+cos((timeMult+(vertex.uv.y*10.0))*TAU))),
 //        100.0+timeMult,
         0.0
     );
@@ -81,8 +82,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 @fragment
 fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
 //    return material_color * textureSample(material_color_texture, material_color_sampler, mesh.uv) * COLOR_MULTIPLIER;
-    var hull_distance = get_ship_distance_approx(input.world_position.xyz);
-    hull_distance = clamp(hull_distance, 0.0, 1.0)/1.0;
+    var hull_distance = 1.0;
+    hull_distance = get_ship_distance_approx(input.world_position.xyz);
+    hull_distance = clamp(hull_distance, 0.0, 3.0)/3.0;
     var color = vec4<f32>(26/255.0, 100/255.0, 200/255.0, 1.0);
     color = color + (vec4<f32>(1.0) * (1.0-hull_distance));
 
@@ -106,20 +108,20 @@ fn get_ship_distance_approx(world_pos: vec3<f32>) -> f32 {
         return 0.0; // Inside ship
     }
 
-    // Check 6-neighbor distance
+//    // Check 6-neighbor distance
     var min_dist = 999.0;
-    for (var x: i32 = -1; x <= 1; x++) {
-        for (var y: i32 = -1; y <= 1; y++) {
-            for (var z: i32 = -1; z <= 1; z++) {
-                let neighbor_coords = voxel_pos + vec3<i32>(x, y, z);
-                let neighbor = textureLoad(voxel_texture, neighbor_coords, 0).r;
-                if (neighbor > 0u) {
-                    let dist = length(vec3<f32>(f32(x), f32(y), f32(z))) * voxel_size;
-                    min_dist = min(min_dist, dist);
-                }
-            }
-        }
-    }
+//    for (var x: i32 = -1; x <= 1; x++) {
+//        for (var y: i32 = -1; y <= 1; y++) {
+//            for (var z: i32 = -1; z <= 1; z++) {
+//                let neighbor_coords = voxel_pos + vec3<i32>(x, y, z);
+//                let neighbor = textureLoad(voxel_texture, neighbor_coords, 0).r;
+//                if (neighbor > 0u) {
+//                    let dist = length(vec3<f32>(f32(x), f32(y), f32(z))) * voxel_size;
+//                    min_dist = min(min_dist, dist);
+//                }
+//            }
+//        }
+//    }
 
     return min_dist;
 }

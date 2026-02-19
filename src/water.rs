@@ -1,6 +1,6 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::Aabb;
-use bevy::camera::visibility::NoFrustumCulling;
+// use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, MeshVertexAttribute, MeshVertexBufferLayoutRef, PrimitiveTopology, VertexFormat};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
@@ -67,7 +67,7 @@ fn setup(
             voxel_size: 0.5,
             voxel_grid: null_texture(images.as_mut())
         })),
-        NoFrustumCulling,
+        // NoFrustumCulling,
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
 }
