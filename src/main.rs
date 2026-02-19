@@ -57,7 +57,7 @@ fn temp_test_update(
         println!("rotation {:?}",orig_rotation);
         transform.rotation = Quat::from_euler(EulerRot::XYZ, orig_rotation.0, orig_rotation.1, orig_rotation.2);
     }
-    if key.pressed(KeyCode::KeyG){
+    if key.pressed(KeyCode::KeyQ){
         let mut total_triangles = 0;
         for mesh_handle in all_renderers.iter() {
             if let Some(mesh) = meshes.get(mesh_handle.0) && let Some(indices) = mesh.indices(){
@@ -82,7 +82,7 @@ fn temp_test_update(
             let config = VoxelizationConfig {
                 resolution: 64,
                 min_voxel_size: Some(0.25),
-                max_voxel_size: Some(0.5),
+                max_voxel_size: Some(0.25),
             };
             
             // Voxelize the meshes
@@ -98,6 +98,7 @@ fn temp_test_update(
     if(key.pressed(KeyCode::KeyB)){
         if let Some(voxel_grid) = &build_data.voxel_grid {
             render_voxel_grid(&voxel_grid, &mut gizmos);
+            info!("kjasjfklajdfjd {}",voxel_grid.voxels.len());
         }
     }
 }

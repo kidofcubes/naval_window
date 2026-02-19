@@ -6,6 +6,7 @@
 use bevy::prelude::*;
 use bevy::mesh::{Mesh, Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::math::{Vec3A, Vec3Swizzles};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 /// Configuration for voxelization process
 #[derive(Debug, Clone)]
@@ -414,4 +415,57 @@ fn fill_interior_floodfill(grid: &mut VoxelGrid) {
             grid.voxels[i] = true;
         }
     }
+}
+
+
+pub fn create_voxel_texture(
+    grid: &VoxelGrid,
+    images: &mut Assets<Image>,
+) -> Handle<Image> {
+    let (width, height, depth) = grid.dimensions;
+
+    // Convert bool voxels to R8Uint texture data
+    let data: Vec<u8> = grid.voxels.iter().map(|&filled| if filled { 255 } else { 0 }).collect();
+    // let data: Vec<u32> = grid.voxels.iter().map(|&filled| if filled { 255 } else { 0 }).collect();
+
+    let mut image = Image::new(
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: depth,
+        },
+        TextureDimension::D3,
+        data,
+        TextureFormat::R8Uint,
+        // TextureFormat::R32Uint,
+        Default::default(),
+    );
+    // for x in 0..width {
+    //     for y in 0..height{
+    //         for z in 0..depth{
+    //             image.get_color_at_3d(x,y,z).and_then(|color| {
+    //                 println!("color at {},{},{} is {:?}",x,y,z,color);
+    //                 Ok("awesome")
+    //             });
+    //         }
+    //     }
+    // }
+
+    return images.add(image)
+}
+pub fn null_texture(images: &mut Assets<Image>) -> Handle<Image> {
+    let data: Vec<u8> = vec![0];
+
+    let mut image = Image::new(
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D3,
+        data,
+        TextureFormat::R8Uint,
+        Default::default(),
+    );
+    return images.add(image)
 }
