@@ -707,8 +707,13 @@ pub fn create_voxel_texture(
 
     return images.add(image)
 }
-pub fn null_texture(images: &mut Assets<Image>) -> Handle<Image> {
-    let data: Vec<u8> = vec![0];
+pub fn null_texture(images: &mut Assets<Image>, dimension: TextureDimension, format: TextureFormat) -> Handle<Image> {
+    let data: Vec<u8>;
+    if let TextureFormat::R8Uint = format {
+        data = vec![0];
+    } else {
+        data = vec![0, 0, 0, 0];
+    }
 
     let mut image = Image::new(
         Extent3d {
@@ -716,9 +721,9 @@ pub fn null_texture(images: &mut Assets<Image>) -> Handle<Image> {
             height: 1,
             depth_or_array_layers: 1,
         },
-        TextureDimension::D3,
+        dimension,
         data,
-        TextureFormat::R8Uint,
+        format,
         Default::default(),
     );
     return images.add(image)

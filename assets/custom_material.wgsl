@@ -32,6 +32,10 @@ struct VertexOutput {
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> voxel_transform: mat4x4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> voxel_size: f32;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var voxel_texture: texture_3d<u32>;
+
+
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var wake_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var wake_sampler: sampler;
 //@group(#{MATERIAL_BIND_GROUP}) @binding(3) var voxel_sampler: sampler;
 
 const PI = 3.1415926538;
@@ -47,11 +51,13 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var offset: vec3<f32> = vec3<f32>(
         0.0,
 //        100.0+sin((timeMult+vertex.uv.x)*TAU)+cos((timeMult+vertex.uv.z)*TAU),
-        0.0+(5.0*0.5*(sin((timeMult+(vertex.uv.x*10.0))*TAU)+cos((timeMult+(vertex.uv.y*10.0))*TAU))),
+        0.0+(0.0*0.5*(sin((timeMult+(vertex.uv.x*10.0))*TAU)+cos((timeMult+(vertex.uv.y*10.0))*TAU))),
 //        1.3+(0.0*(sin((timeMult+(vertex.uv.x*10.0))*TAU)+cos((timeMult+(vertex.uv.y*10.0))*TAU))),
 //        100.0+timeMult,
         0.0
     );
+    offset.y += textureSampleLevel(wake_texture, wake_sampler, vertex.uv.xy, 0.0).r * 10.0;
+//    offset.y += textureLoad(wake_texture, vec2<i32>(vertex.uv.xy*256), 0).r * 10;
     let world_position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);
 
     out.clip_position = mesh_position_local_to_clip(
@@ -87,6 +93,8 @@ fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
     hull_distance = clamp(hull_distance, 0.0, 3.0)/3.0;
     var color = vec4<f32>(26/255.0, 100/255.0, 200/255.0, 1.0);
     color = color + (vec4<f32>(1.0) * (1.0-hull_distance));
+
+    color = color + vec4<f32>(input.uv.xy-0.5, 0.0, 1.0);
 
     return color;
 //    return vec4<f32>(input.world_position.xz, f32(center), 1.0);
