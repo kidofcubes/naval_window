@@ -8,9 +8,11 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension, TextureFormat};
 use bevy::shader::{ShaderDefVal, ShaderRef};
 use rand::{random, random_bool, random_range};
-use crate::BuildData;
+use crate::{water_stuff, BuildData};
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
 use crate::wake_simulation::WakeSimulation;
+use crate::water_stuff::ocean_mesh::WaterMaterial;
+use crate::water_stuff::spawn_water_mesh;
 
 const SHADER_ASSET_PATH: &str = "custom_material.wgsl";
 
@@ -21,9 +23,14 @@ const ATTRIBUTE_BLEND_COLOR: MeshVertexAttribute =
 pub struct WaterPlugin;
 impl Plugin for WaterPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<CustomMaterial>{
+        app.add_plugins((MaterialPlugin::<CustomMaterial>{
             ..default()
-        });
+        },
+        MaterialPlugin::<WaterMaterial>{
+             ..default()
+         },
+            water_stuff::WaterPlugin
+        ));
         app.add_systems(Startup, setup);
         app.add_systems(Update, update);
     }
@@ -37,6 +44,7 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut custom_materials: ResMut<Assets<CustomMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut water_material: ResMut<Assets<water_stuff::ocean_mesh::WaterMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
 
@@ -61,32 +69,34 @@ fn setup(
     // ));
 
 
-    commands.spawn((
-        Mesh3d(meshes.add(mesh)),
-        MeshMaterial3d(custom_materials.add(CustomMaterial {
-            // color: LinearRgba::BLUE,
-            // color_texture: Some(asset_server.load("yuyuchonk.png")),
-            // alpha_mode: AlphaMode::Blend,
-            time: 0.0,
-            voxel_transform: Mat4::IDENTITY,
-            voxel_size: 0.5,
-            voxel_grid: null_texture(images.as_mut(), TextureDimension::D3, TextureFormat::R8Uint),
-            // wake_texture: null_texture(images.as_mut(), TextureDimension::D2, TextureFormat::R32Float),
-            wake_texture: wake_sim.texture_handle.clone(),
-            wake_center: Vec2::new(0.0,0.0),
-            wake_world_size: 256.0
-        })),
-        // NoFrustumCulling,
-        Transform::from_xyz(0.0, 0.0, 0.0),
-    ));
-    commands.insert_resource(wake_sim);
+    // commands.spawn((
+    //     Mesh3d(meshes.add(mesh)),
+    //     MeshMaterial3d(custom_materials.add(CustomMaterial {
+    //         // color: LinearRgba::BLUE,
+    //         // color_texture: Some(asset_server.load("yuyuchonk.png")),
+    //         // alpha_mode: AlphaMode::Blend,
+    //         time: 0.0,
+    //         voxel_transform: Mat4::IDENTITY,
+    //         voxel_size: 0.5,
+    //         voxel_grid: null_texture(images.as_mut(), TextureDimension::D3, TextureFormat::R8Uint),
+    //         // wake_texture: null_texture(images.as_mut(), TextureDimension::D2, TextureFormat::R32Float),
+    //         wake_texture: wake_sim.texture_handle.clone(),
+    //         wake_center: Vec2::new(0.0,0.0),
+    //         wake_world_size: 256.0
+    //     })),
+    //     // NoFrustumCulling,
+    //     Transform::from_xyz(0.0, 0.0, 0.0),
+    // ));
+    // commands.insert_resource(wake_sim);
+
+    spawn_water_mesh(&mut commands, &mut meshes, &mut water_material, &mut images);
 }
 
 fn update(
     mut materials: ResMut<Assets<CustomMaterial>>,
     mut build_data: ResMut<BuildData>,
     mut images: ResMut<Assets<Image>>,
-    mut wake_simulation: ResMut<WakeSimulation>,
+    // mut wake_simulation: ResMut<WakeSimulation>,
     key: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut gizmo: Gizmos,
@@ -99,25 +109,25 @@ fn update(
         }
     }
 
-    if(random_bool(0.1)){
-        let plane_size = wake_simulation.plane_size;
-        wake_simulation.add_impulse(Vec2::new(random_range(0.0..plane_size),random_range(0.0..plane_size)), 1.0, 1.0);
-    }
-
-    wake_simulation.step(time.delta_secs());
-    wake_simulation.update_texture(images.as_mut());
-    for x in 0..wake_simulation.resolution {
-        for y in 0..wake_simulation.resolution {
-            let value = wake_simulation.current_heights.get(y * wake_simulation.resolution + x).unwrap();
-            let mut pos = Vec3::new(
-                (x as f32/wake_simulation.resolution as f32) * wake_simulation.plane_size,
-                    0.0,
-                (y as f32/wake_simulation.resolution as f32) * wake_simulation.plane_size
-            );
-            pos -= vec3(-500.0,0.0,-500.0);
-            gizmo.line(pos, pos+Vec3::new(0.0,*value,0.0), Color::WHITE)
-        }
-    }
+    // if(random_bool(0.1)){
+    //     let plane_size = wake_simulation.plane_size;
+    //     wake_simulation.add_impulse(Vec2::new(random_range(0.0..plane_size),random_range(0.0..plane_size)), 1.0, 1.0);
+    // }
+    //
+    // wake_simulation.step(time.delta_secs());
+    // wake_simulation.update_texture(images.as_mut());
+    // for x in 0..wake_simulation.resolution {
+    //     for y in 0..wake_simulation.resolution {
+    //         let value = wake_simulation.current_heights.get(y * wake_simulation.resolution + x).unwrap();
+    //         let mut pos = Vec3::new(
+    //             (x as f32/wake_simulation.resolution as f32) * wake_simulation.plane_size,
+    //                 0.0,
+    //             (y as f32/wake_simulation.resolution as f32) * wake_simulation.plane_size
+    //         );
+    //         pos -= vec3(-500.0,0.0,-500.0);
+    //         gizmo.line(pos, pos+Vec3::new(0.0,*value,0.0), Color::WHITE)
+    //     }
+    // }
 
 }
 fn update_material(mut material: &mut CustomMaterial, voxel_grid: &VoxelGrid, images: &mut Assets<Image>){

@@ -1,7 +1,8 @@
 mod cam_movement;
-mod water;
+mod water_stuff;
 mod voxelize;
 mod wake_simulation;
+mod water;
 
 use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, window::WindowResolution};
 use std::{env, path::{Path, PathBuf}};
@@ -13,7 +14,7 @@ use naval_sketch::parts::{AdjustableHull, BasePart, Part, PartRegistry};
 use naval_sketch::parts_loader::LocalPaths;
 use crate::voxelize::{render_voxel_grid, voxelize_meshes, VoxelGrid, VoxelizationConfig};
 use crate::cam_movement::CameraMovementPlugin;
-use crate::water::WaterPlugin;
+use crate::water_stuff::WaterPlugin;
 
 fn temp_test_update(
     //mut mesh_thing: ResMut<BuildData>,
@@ -320,15 +321,15 @@ fn main() {
 
 
     App::new()
-        .insert_resource(InitData {
-            file_path,
-            data_paths: data_paths.clone()
-        })
+        // .insert_resource(InitData {
+        //     file_path,
+        //     data_paths: data_paths.clone()
+        // })
         .insert_resource(WireframeConfig {
             // The global wireframe config enables drawing of wireframes on every mesh,
             // except those with `NoWireframe`. Meshes with `Wireframe` will always have a wireframe,
             // regardless of the global configuration.
-            global: false,
+            global: true,
             // Controls the default color of all wireframes. Used as the default color for global wireframes.
             // Can be changed per mesh using the `WireframeColor` component.
             default_color: Color::WHITE,
@@ -340,11 +341,11 @@ fn main() {
         .add_plugins((
             // WebAssetPlugin,
             default_plugins,
-            NavalSketchPlugin{
-                init_paths: data_paths.unwrap(),
-            },
+            // NavalSketchPlugin{
+            //     init_paths: data_paths.unwrap(),
+            // },
             WireframePlugin::default(),
-            WaterPlugin,
+            water::WaterPlugin,
             CameraMovementPlugin,
             MeshPickingPlugin,
             //OutlinePlugin,
