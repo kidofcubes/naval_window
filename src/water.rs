@@ -12,7 +12,7 @@ use crate::{water_stuff, BuildData};
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
 use crate::wake_simulation::WakeSimulation;
 use crate::water_stuff::ocean_mesh::WaterMaterial;
-use crate::water_stuff::spawn_water_mesh;
+use crate::water_stuff::{spawn_water_mesh, HeightFieldHandle};
 
 const SHADER_ASSET_PATH: &str = "custom_material.wgsl";
 
@@ -31,7 +31,7 @@ impl Plugin for WaterPlugin {
          },
             water_stuff::WaterPlugin
         ));
-        app.add_systems(Startup, setup);
+        app.add_systems(Startup, (setup).after(crate::water_stuff::temp_setup));
         app.add_systems(Update, update);
     }
 }
@@ -46,6 +46,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut water_material: ResMut<Assets<water_stuff::ocean_mesh::WaterMaterial>>,
     asset_server: Res<AssetServer>,
+    height_field_handle: Res<HeightFieldHandle>
 ) {
 
     let mut wake_sim = WakeSimulation::new(images.as_mut(),1024, 512.0);
@@ -89,7 +90,7 @@ fn setup(
     // ));
     // commands.insert_resource(wake_sim);
 
-    spawn_water_mesh(&mut commands, &mut meshes, &mut water_material, &mut images);
+    spawn_water_mesh(&mut commands, &mut meshes, &mut water_material, &mut images, &height_field_handle);
 }
 
 fn update(

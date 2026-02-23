@@ -110,9 +110,9 @@ pub struct WaterGpuResources {
     // ── Reconstructed height field ─────────────────────────────────────────
     // R32Float 2D texture.  Readable by the vertex shader + CPU readback
     // for buoyancy calculations.
-    pub height_field:         Texture,
-    pub height_field_view:    TextureView,
-    pub height_field_sampler: Sampler,
+    // pub height_field:         Texture,
+    // pub height_field_view:    TextureView,
+    // pub height_field_sampler: Sampler,
 }
 
 impl WaterGpuResources {
@@ -221,9 +221,9 @@ pub fn prepare_gpu_resources(
         obstacle_mask_view,
         profile_buf,
         profile_buf_view,
-        height_field,
-        height_field_view,
-        height_field_sampler,
+        // height_field,
+        // height_field_view,
+        // height_field_sampler,
     });
 }
 

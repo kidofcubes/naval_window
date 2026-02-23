@@ -3,9 +3,11 @@ use bevy::{
     render::render_resource::{AsBindGroup},
 };
 use bevy::asset::RenderAssetUsages;
-use bevy::mesh::{Indices, PrimitiveTopology};
-use bevy::shader::ShaderRef;
-use super::{DOMAIN_SIZE, GRID_SIZE};
+use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
+use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
+use bevy::render::render_resource::{RenderPipelineDescriptor, SpecializedMeshPipelineError};
+use bevy::shader::{ShaderDefVal, ShaderRef};
+use super::{HeightFieldHandle, DOMAIN_SIZE, GRID_SIZE};
 
 // ─── Water Material ───────────────────────────────────────────────────────────
 
@@ -50,6 +52,46 @@ impl Material for WaterMaterial {
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Blend
     }
+    fn depth_bias(&self) -> f32 {
+        return 0.0;
+    }
+
+
+
+    // fn enable_shadows() -> bool {
+    //     return true;
+    // }
+    // fn enable_prepass() -> bool {
+    //     return true;
+    // }
+
+    fn specialize(pipeline: &MaterialPipeline, descriptor: &mut RenderPipelineDescriptor, layout: &MeshVertexBufferLayoutRef, key: MaterialPipelineKey<Self>) -> Result<(), SpecializedMeshPipelineError> {
+        // Explicitly enable depth write even in transparent pass
+        if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
+            depth_stencil.depth_write_enabled = true;
+        }
+
+        descriptor.primitive.cull_mode = None;
+
+        if descriptor
+            .vertex
+            .shader_defs
+            .contains(&ShaderDefVal::Bool("PREPASS_PIPELINE".into(), true))
+        {
+            return Ok(());
+        }
+
+        let vertex_layout = layout.0.get_layout(&[
+            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+
+            // ATTRIBUTE_BLEND_COLOR.at_shader_location(1),
+
+        ])?;
+        descriptor.vertex.buffers = vec![vertex_layout];
+        Ok(())
+    }
 }
 
 // ─── Marker Component ─────────────────────────────────────────────────────────
@@ -71,6 +113,7 @@ pub fn spawn_water_mesh(
     meshes:          &mut Assets<Mesh>,
     materials:       &mut Assets<WaterMaterial>,
     images:          &mut Assets<Image>,
+    hf_handle:       &Res<HeightFieldHandle>,
 ) -> Entity {
     use bevy::render::render_resource::{
         Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
@@ -78,24 +121,10 @@ pub fn spawn_water_mesh(
 
     // Create a placeholder height field image.  The actual data is written
     // each frame by the compute shader, so this just needs the right
-    // format and size to allocate GPU memory.
-    let hf_image = Image {
-        texture_descriptor: TextureDescriptor {
-            label:               Some("height_field_mat"),
-            size:                Extent3d { width: GRID_SIZE, height: GRID_SIZE, depth_or_array_layers: 1 },
-            mip_level_count:     1,
-            sample_count:        1,
-            dimension:           TextureDimension::D2,
-            format:              TextureFormat::R32Float,
-            usage:               TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST
-                | TextureUsages::STORAGE_BINDING,
-            view_formats:        &[],
-        },
-        data: Some(vec![0u8; (GRID_SIZE * GRID_SIZE * 4) as usize]),
-        ..default()
-    };
-    let hf_handle = images.add(hf_image);
+    // format and size to allocate GPU memory.;
+    // let hf_handle = images.add(hf_image);
+    // let hf_handle = images.add(hf_image);
+    // let hf_handle = hf_handle;
 
     // Tessellated plane.  Higher subdivisions = smoother wave geometry.
     // 256×256 gives good quality; reduce to 128 for lower-end hardware.
@@ -110,7 +139,7 @@ pub fn spawn_water_mesh(
         height_scale: 1.5,
         domain_size:  DOMAIN_SIZE,
         grid_size:    GRID_SIZE,
-        height_field: hf_handle,
+        height_field: hf_handle.0.clone(),
     });
 
     commands.spawn((

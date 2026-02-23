@@ -16,7 +16,7 @@ use bevy::{
 };
 use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
 use bevy::render::render_graph::RenderGraphExt;
-use bevy::render::render_resource::ShaderType;
+use bevy::render::render_resource::{Extent3d, ShaderType, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages};
 use bevy::render::RenderSystems;
 use crate::water::CustomMaterial;
 use crate::water_stuff;
@@ -102,6 +102,10 @@ impl Default for WaterSettings {
     }
 }
 
+// A resource to pass the handle into the render world
+#[derive(Resource, ExtractResource, Clone)]
+pub struct HeightFieldHandle(pub Handle<Image>);
+
 // ─── Plugin ──────────────────────────────────────────────────────────────────
 
 pub struct WaterPlugin;
@@ -110,6 +114,8 @@ impl Plugin for WaterPlugin {
     fn build(&self, app: &mut App) {
         app
             .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
+            .add_plugins(ExtractResourcePlugin::<HeightFieldHandle>::default())
+            .add_systems(Startup, (temp_setup))
             // Advance simulation time each frame
             // .add_systems(Update, (tick_water_time, sync_ship_position))
         ;
@@ -119,7 +125,6 @@ impl Plugin for WaterPlugin {
             .init_resource::<ObstacleMask>()
             .init_resource::<WaterSettings>()
             .add_systems(Update, (tick_water_time))
-            .add_systems(Startup, (temp_setup))
             .add_systems(
                 Render,
                 (
@@ -152,13 +157,35 @@ impl Plugin for WaterPlugin {
     }
 }
 
-fn temp_setup(
+pub fn temp_setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut water_material: ResMut<Assets<water_stuff::ocean_mesh::WaterMaterial>>,
+    // mut hf_handle: ResMut<HeightFieldHandle>,
+    // mut commands: Commands,
 ){
-    spawn_water_mesh(&mut commands, &mut meshes, &mut water_material, &mut images);
+    let hf_image = Image {
+        texture_descriptor: TextureDescriptor {
+            label:               Some("height_field_mat"),
+            size:                Extent3d { width: GRID_SIZE, height: GRID_SIZE, depth_or_array_layers: 1 },
+            mip_level_count:     1,
+            sample_count:        1,
+            dimension:           TextureDimension::D2,
+            format:              TextureFormat::R32Float,
+            usage:               TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::STORAGE_BINDING,
+            view_formats:        &[],
+        },
+        data: Some(vec![0u8; (GRID_SIZE * GRID_SIZE * 4) as usize]),
+        ..default()
+    };
+    // hf_handle.0=images.add(hf_image);
+    commands.insert_resource(HeightFieldHandle{0: images.add(hf_image)})
+
+
+    // spawn_water_mesh(&mut commands, &mut meshes, &mut water_material, &mut images);
 }
 
 // ─── Update Systems ──────────────────────────────────────────────────────────

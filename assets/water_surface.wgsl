@@ -32,9 +32,9 @@ struct WaterMaterial {
     grid_size:    u32,
 }
 
-@group(2) @binding(0) var<uniform> material: WaterMaterial;
-@group(2) @binding(1) var height_tex: texture_2d<f32>;
-@group(2) @binding(2) var height_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: WaterMaterial;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var height_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var height_sampler: sampler;
 
 // ─── Vertex I/O ───────────────────────────────────────────────────────────────
 
@@ -91,9 +91,14 @@ fn vertex(v: Vertex) -> VertexOut {
 
     // Displace vertex upward.
     let local_pos  = vec4<f32>(v.position.x, v.position.y + h, v.position.z, 1.0);
+//    let local_pos  = vec4<f32>(v.position.x, v.position.y + h, v.position.z, 1.0);
     let world_pos  = get_world_from_local(v.instance_index) * local_pos;
     out.world_pos  = world_pos.xyz;
-    out.clip_pos   = position_world_to_clip(world_pos.xyz);
+    out.clip_pos   = mesh_position_local_to_clip(
+        get_world_from_local(v.instance_index),
+        local_pos
+    );
+//    out.clip_pos   = position_world_to_clip(world_pos.xyz);
     out.wave_height = h;
     out.normal     = compute_normal(v.uv);
 
@@ -109,8 +114,10 @@ const SUN_DIR:   vec3<f32> = vec3<f32>(0.4, 0.8, 0.3);   // normalised in fn
 const SUN_COLOR: vec3<f32> = vec3<f32>(1.0, 0.95, 0.8);
 
 @fragment
-fn fragment(in: VertexOut) -> @location(0) vec4<f32> {
-    let N = normalize(in.normal);
+fn fragment(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
+//    return vec4<f32>(in.uv.x, in.uv.y, (in.wave_height/100.0), 0.5);
+//    let N = normalize(in.normal);
+    let N = normalize(select(-in.normal, in.normal, front_facing));
     let V = normalize(view.world_position.xyz - in.world_pos);
     let L = normalize(SUN_DIR);
 
@@ -143,7 +150,7 @@ fn fragment(in: VertexOut) -> @location(0) vec4<f32> {
     // Simple threshold on wave height. For a proper foam mask you'd track
     // the Jacobian of the height field in the compute pass.
     let foam_threshold = 0.8 * material.height_scale;
-    let foam_amount    = smoothstep(foam_threshold * 0.8, foam_threshold, in.wave_height);
+    let foam_amount    = smoothstep(foam_threshold * 0.8, foam_threshold + 100, in.wave_height);
     let foam_color     = vec3<f32>(1.0, 1.0, 1.0);
 
     // ── Combine ───────────────────────────────────────────────────────────
@@ -152,7 +159,8 @@ fn fragment(in: VertexOut) -> @location(0) vec4<f32> {
     color     = color + specular * fresnel;
 
     // Opacity: more opaque at grazing angles (Fresnel), translucent otherwise.
-    let alpha = mix(material.base_color.a, 1.0, fresnel * 0.6 + foam_amount * 0.5);
+    var alpha = mix(material.base_color.a, 1.0, fresnel * 0.6 + foam_amount * 0.5);
+    alpha = 1.0;
 
     return vec4<f32>(color, alpha);
 }

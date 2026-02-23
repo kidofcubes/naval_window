@@ -5,8 +5,10 @@ use bevy::{
         renderer::RenderDevice,
     },
 };
+use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::binding_types::{texture_storage_2d, texture_storage_2d_array, uniform_buffer};
-use super::{WaterSettings, resources::WaterGpuResources};
+use bevy::render::texture::GpuImage;
+use super::{WaterSettings, resources::WaterGpuResources, HeightFieldHandle};
 
 // ─── Pipeline Resource ────────────────────────────────────────────────────────
 
@@ -172,10 +174,20 @@ pub fn queue_bind_groups(
     gpu:           Option<ResMut<WaterGpuResources>>,
     settings:      Res<WaterSettings>,
     existing_bgs:  Option<ResMut<WaterBindGroups>>,
+    hf_handle:  Option<ResMut<HeightFieldHandle>>,
+    render_images: Res<RenderAssets<GpuImage>>,
     queue:         Res<bevy::render::renderer::RenderQueue>,
     pipeline_cache: Res<PipelineCache>,
 ) {
     let Some(mut gpu) = gpu else { return };
+
+    let Some(hf_handle) = hf_handle else { return };
+    // Get the GpuImage Bevy uploaded from your Image asset
+    let Some(gpu_image) = render_images.get(&hf_handle.0) else { return };
+
+    // This texture_view is the exact same texture the material will sample.
+    // Use it as the compute shader's write target.
+    let height_write_view = &gpu_image.texture_view;
 
     // ── Create or update the settings uniform buffer ───────────────────────
     let settings_buf = if let Some(mut bgs) = existing_bgs {
@@ -229,7 +241,7 @@ pub fn queue_bind_groups(
         &BindGroupEntries::sequential((
             amp_write,
             &gpu.profile_buf_view,
-            &gpu.height_field_view,
+            height_write_view,
             settings_buf.as_entire_binding(),
         )),
     );

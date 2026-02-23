@@ -135,7 +135,7 @@ fn advect(@builtin(global_invocation_id) gid: vec3<u32>) {
     let cell_m = s.domain_size / f32(s.grid_size); // metres per cell
 
     // Advection in grid-cell units per timestep.
-    let advect_cells = cg * s.dt / cell_m;
+    let advect_cells = (cg * s.dt / cell_m)* 1000.0;
 
     // ── 2. Trace backward ──────────────────────────────────────────────────
     var prev = vec2<f32>(f32(x), f32(y)) - dv * advect_cells;
@@ -177,24 +177,24 @@ fn advect(@builtin(global_invocation_id) gid: vec3<u32>) {
         amp = mix(amp, (amp + a_prev + a_next) / 3.0, ang);
     }
 
-    // ── 6. Ship source term ────────────────────────────────────────────────
-    // Emit a small Kelvin-wake source term at the ship's grid position.
-    // The ship injects energy into all directions, but preferentially
-    // in the direction opposite to travel (stern → wake).
-    let cell_pos = vec2<f32>(f32(x), f32(y));
-    let half_gs  = f32(s.grid_size) * 0.5;
-    let ship_grid = vec2<f32>(s.ship_pos_x,s.ship_pos_z) / s.domain_size * f32(s.grid_size) + half_gs;
-    let dist      = length(cell_pos - ship_grid);
-
-    // Gaussian footprint of ship source, radius ≈ 3 cells.
-    let source_radius = 3.0;
-    let source_weight = exp(-dist * dist / (2.0 * source_radius * source_radius));
-
-    // Directional weighting: bias emission backwards from the wind/ship heading
-    let ship_dir_bias = max(0.0, dot(-dv, vec2<f32>(cos(s.wind_direction), sin(s.wind_direction))));
-    let source_amp    = phillips_amplitude(s.k0) * s.ship_source_strength * source_weight * (0.5 + 0.5 * ship_dir_bias);
-
-    amp = amp + source_amp;
+//    // ── 6. Ship source term ────────────────────────────────────────────────
+//    // Emit a small Kelvin-wake source term at the ship's grid position.
+//    // The ship injects energy into all directions, but preferentially
+//    // in the direction opposite to travel (stern → wake).
+//    let cell_pos = vec2<f32>(f32(x), f32(y));
+//    let half_gs  = f32(s.grid_size) * 0.5;
+//    let ship_grid = vec2<f32>(s.ship_pos_x,s.ship_pos_z) / s.domain_size * f32(s.grid_size) + half_gs;
+//    let dist      = length(cell_pos - ship_grid);
+//
+//    // Gaussian footprint of ship source, radius ≈ 3 cells.
+//    let source_radius = 3.0;
+//    let source_weight = exp(-dist * dist / (2.0 * source_radius * source_radius));
+//
+//    // Directional weighting: bias emission backwards from the wind/ship heading
+//    let ship_dir_bias = max(0.0, dot(-dv, vec2<f32>(cos(s.wind_direction), sin(s.wind_direction))));
+//    let source_amp    = phillips_amplitude(s.k0) * s.ship_source_strength * source_weight * (0.5 + 0.5 * ship_dir_bias);
+//
+//    amp = amp + source_amp;
 
     // ── 7. Clamp and write ─────────────────────────────────────────────────
     // Clamp to avoid numerical explosions.
