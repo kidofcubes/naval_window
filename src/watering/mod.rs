@@ -1,6 +1,8 @@
 use std::f32::consts::TAU;
 use bevy::app::{App, Plugin, Startup, Update};
 use bevy::prelude::*;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 pub struct Watering;
 impl Plugin for Watering{
@@ -89,6 +91,7 @@ const GRAVITY: f32 = 9.81;
 
 
 const PROFILE_BUFFER_LENGTH: usize = 512;
+const TIME_MULT: f32 = 3.0;
 
 fn update(
     mut watering_stuff: ResMut<WateringStuff>,
@@ -110,10 +113,30 @@ fn update(
 
             for x in 0..GRID_X_SIZE {
                 for z in 0..GRID_Z_SIZE {
-                    let prev_x = (x as f32) + ( f32::cos(theta) * (group_speed * time.delta_secs()));
-                    let prev_z = (z as f32) + ( f32::sin(theta) * (group_speed * time.delta_secs()));
-                    let prev_amplitude = watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, theta_index, wave_index);
-                    watering_stuff.new_sim_grid[x][z][theta_index][wave_index] = prev_amplitude;
+                    let dx = ( f32::cos(theta) * (group_speed * time.delta_secs() * TIME_MULT));
+                    let dz = ( f32::sin(theta) * (group_speed * time.delta_secs() * TIME_MULT));
+                    let prev_x = (x as f32) - dx;
+                    let prev_z = (z as f32) - dz;
+                    let mut new_amplitude = 0.0;
+                    // prev_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32-2i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.10;
+                    // prev_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32-1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.25;
+                    // prev_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.30;
+                    // prev_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.25;
+                    // prev_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+2i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.10;
+
+
+                    new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32-1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.25;
+                    new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.50;
+                    new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.25;
+
+                    // new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 1.00;
+
+                    new_amplitude *= 0.5;
+
+                    new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x - dx, prev_z - dx, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.25;
+                    new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x + dx, prev_z + dx, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.25;
+
+                    watering_stuff.new_sim_grid[x][z][theta_index][wave_index] = new_amplitude;
 
                     //todo do the other random stuff to make it look better later
 
@@ -125,12 +148,17 @@ fn update(
     std::mem::swap(&mut watering_stuff_mut.sim_grid, &mut watering_stuff_mut.new_sim_grid);
 
 
+    let mut r = StdRng::seed_from_u64(0);
 
-    let mut profile_buffer: [f32; PROFILE_BUFFER_LENGTH] = [0.0; PROFILE_BUFFER_LENGTH];
+    let mut profile_buffer: [[f32; PROFILE_BUFFER_LENGTH]; DIRECTIONS] = [[0.0; PROFILE_BUFFER_LENGTH]; DIRECTIONS];
 
-    for p in 0..PROFILE_BUFFER_LENGTH{
-        let phase = (p as f32 / PROFILE_BUFFER_LENGTH as f32) * TAU;
-        profile_buffer[p] = f32::cos(phase);
+    for theta_index in 0..DIRECTIONS {
+        let mut offset = r.random_range(0.0..TAU)/4.0;
+        // offset = 0.0;
+        for p in 0..PROFILE_BUFFER_LENGTH {
+            let phase = (p as f32 / PROFILE_BUFFER_LENGTH as f32) * TAU;
+            profile_buffer[theta_index][p] = f32::cos(phase+offset);
+        }
     }
 
 
@@ -150,11 +178,11 @@ fn update(
                     let position_offset = vec2(real_x,real_z).dot(vec2(f32::cos(theta),f32::sin(theta)));
                     let angular_frequency = f32::sqrt(GRAVITY * wave_number);
 
-                    let phase_coordinate = (wave_number*position_offset) + ((time.elapsed_secs()) * angular_frequency);
+                    let phase_coordinate = (wave_number*position_offset) - ((time.elapsed_secs() * TIME_MULT) * angular_frequency);
                     if (x==0&&z==0) || (x==RENDER_X_SIZE-1&&z==RENDER_Z_SIZE-1) {
                         // println!("phase_coordinate {}", (((phase_coordinate/TAU) * PROFILE_BUFFER_LENGTH as f32) as i32));
                     }
-                    // watering_stuff.height_map[x][z] += amplitude * profile_buffer[(((phase_coordinate/TAU) * PROFILE_BUFFER_LENGTH as f32) as i32).rem_euclid(PROFILE_BUFFER_LENGTH as i32) as usize];
+                    // watering_stuff.height_map[x][z] += amplitude * profile_buffer[theta_index][(((phase_coordinate/TAU) * PROFILE_BUFFER_LENGTH as f32) as i32).rem_euclid(PROFILE_BUFFER_LENGTH as i32) as usize];
                     watering_stuff.height_map[x][z] += amplitude * (phase_coordinate).cos();
                 }
             }
