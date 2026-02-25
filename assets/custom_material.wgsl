@@ -34,10 +34,6 @@ struct VertexOutput {
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var voxel_texture: texture_3d<u32>;
 
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(10) var wake_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(11) var wake_sampler: sampler;
-//@group(#{MATERIAL_BIND_GROUP}) @binding(3) var voxel_sampler: sampler;
-
 const PI = 3.1415926538;
 const TAU = PI * 2;
 
@@ -56,7 +52,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 //        100.0+timeMult,
         0.0
     );
-    offset.y += textureSampleLevel(wake_texture, wake_sampler, vertex.uv.xy, 0.0).r * 10.0;
+//    offset.y += textureSampleLevel(wake_texture, wake_sampler, vertex.uv.xy, 0.0).r * 10.0;
 //    offset.y += textureLoad(wake_texture, vec2<i32>(vertex.uv.xy*256), 0).r * 10;
     let world_position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);
 

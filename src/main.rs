@@ -1,7 +1,7 @@
 mod cam_movement;
 mod water;
 mod voxelize;
-mod wake_simulation;
+mod watering;
 
 use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, window::WindowResolution};
 use std::{env, path::{Path, PathBuf}};

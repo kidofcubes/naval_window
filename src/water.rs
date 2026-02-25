@@ -10,7 +10,7 @@ use bevy::shader::{ShaderDefVal, ShaderRef};
 use rand::{random, random_bool, random_range};
 use crate::BuildData;
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
-use crate::wake_simulation::WakeSimulation;
+use crate::watering::Watering;
 
 const SHADER_ASSET_PATH: &str = "custom_material.wgsl";
 
@@ -24,6 +24,8 @@ impl Plugin for WaterPlugin {
         app.add_plugins(MaterialPlugin::<CustomMaterial>{
             ..default()
         });
+
+        app.add_plugins(Watering);
         app.add_systems(Startup, setup);
         app.add_systems(Update, update);
     }
@@ -40,7 +42,6 @@ fn setup(
     asset_server: Res<AssetServer>,
 ) {
 
-    let mut wake_sim = WakeSimulation::new(images.as_mut(),1024, 512.0);
     // let mesh = Mesh::from(Plane3d {
     //         half_size: Vec2::new(50.0, 50.0),
     //         normal: Dir3::Y,
@@ -71,22 +72,17 @@ fn setup(
             voxel_transform: Mat4::IDENTITY,
             voxel_size: 0.5,
             voxel_grid: null_texture(images.as_mut(), TextureDimension::D3, TextureFormat::R8Uint),
-            // wake_texture: null_texture(images.as_mut(), TextureDimension::D2, TextureFormat::R32Float),
-            wake_texture: wake_sim.texture_handle.clone(),
-            wake_center: Vec2::new(0.0,0.0),
-            wake_world_size: 256.0
         })),
         // NoFrustumCulling,
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
-    commands.insert_resource(wake_sim);
+    // commands.insert_resource(wake_sim);
 }
 
 fn update(
     mut materials: ResMut<Assets<CustomMaterial>>,
     mut build_data: ResMut<BuildData>,
     mut images: ResMut<Assets<Image>>,
-    mut wake_simulation: ResMut<WakeSimulation>,
     key: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut gizmo: Gizmos,
@@ -98,27 +94,6 @@ fn update(
             update_material(&mut material, voxel_grid, &mut images)
         }
     }
-
-    if(random_bool(0.1)){
-        let plane_size = wake_simulation.plane_size;
-        wake_simulation.add_impulse(Vec2::new(random_range(0.0..plane_size),random_range(0.0..plane_size)), 1.0, 1.0);
-    }
-
-    wake_simulation.step(time.delta_secs());
-    wake_simulation.update_texture(images.as_mut());
-    for x in 0..wake_simulation.resolution {
-        for y in 0..wake_simulation.resolution {
-            let value = wake_simulation.current_heights.get(y * wake_simulation.resolution + x).unwrap();
-            let mut pos = Vec3::new(
-                (x as f32/wake_simulation.resolution as f32) * wake_simulation.plane_size,
-                    0.0,
-                (y as f32/wake_simulation.resolution as f32) * wake_simulation.plane_size
-            );
-            pos -= vec3(-500.0,0.0,-500.0);
-            gizmo.line(pos, pos+Vec3::new(0.0,*value,0.0), Color::WHITE)
-        }
-    }
-
 }
 fn update_material(mut material: &mut CustomMaterial, voxel_grid: &VoxelGrid, images: &mut Assets<Image>){
     println!("thing is {}",material.voxel_transform.mul_vec4(vec4(1.0,1.0,1.0,1.0)));
@@ -140,14 +115,6 @@ pub struct CustomMaterial {
     #[texture(3, dimension = "3d", sample_type = "u_int")]
     // #[sampler(3)]
     voxel_grid: Handle<Image>,
-
-    #[texture(10, dimension = "2d", sample_type = "float")]
-    #[sampler(11)]
-    pub wake_texture: Handle<Image>,
-    #[uniform(12)]
-    pub wake_center: Vec2,
-    #[uniform(13)]
-    pub wake_world_size: f32,
 
     // #[uniform(0)]
     // color: LinearRgba,
