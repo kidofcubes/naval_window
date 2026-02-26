@@ -1,6 +1,11 @@
+mod pipeline;
+
 use std::f32::consts::TAU;
+use std::time::Instant;
 use bevy::app::{App, Plugin, Startup, Update};
 use bevy::prelude::*;
+use bevy::render::renderer::RenderDevice;
+use bevy::render::settings::WgpuFeatures;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -12,7 +17,8 @@ impl Plugin for Watering{
         // });
         app.insert_resource(WateringStuff::default());
         app.insert_resource(WateringStuffTest {
-            complex_component: 0.0
+            scale: 5.0,
+            radius: 5.0,
         });
         // app.add_systems(Startup, );
         app.add_systems(Update, (update,debug_update).chain());
@@ -30,7 +36,8 @@ const RENDER_Z_SIZE: usize = 256;
 
 #[derive(Resource)]
 struct WateringStuffTest {
-    complex_component: f32
+    scale: f32,
+    radius: f32,
 }
 
 #[derive(Resource)]
@@ -99,13 +106,15 @@ impl AmplitudeGrid for [[[[Vec2; TOTAL_WAVE_NUMBERS]; DIRECTIONS]; GRID_Z_SIZE];
 const GRAVITY: f32 = 9.81;
 
 
-const PROFILE_BUFFER_LENGTH: usize = 512;
+const PROFILE_BUFFER_LENGTH: usize = 2048;
 const TIME_MULT: f32 = 3.0;
 
 fn update(
     mut watering_stuff: ResMut<WateringStuff>,
     time: Res<Time>
 ) {
+    let mut start_instant: Instant;
+    start_instant =  Instant::now();
     for wave_index in 0..TOTAL_WAVE_NUMBERS {
 
         // how many waves per 2pi meters
@@ -153,24 +162,32 @@ fn update(
             }
         }
     }
+    // println!("elapsed {}ms for advection", start_instant.elapsed().as_millis());
     let watering_stuff_mut = watering_stuff.as_mut();
     std::mem::swap(&mut watering_stuff_mut.sim_grid, &mut watering_stuff_mut.new_sim_grid);
 
 
     let mut r = StdRng::seed_from_u64(0);
 
-    let mut profile_buffer: [[f32; PROFILE_BUFFER_LENGTH]; DIRECTIONS] = [[0.0; PROFILE_BUFFER_LENGTH]; DIRECTIONS];
+    //plug in position offset*wave_number and the rest is precomputed
+    let mut profile_buffer: [[f32; PROFILE_BUFFER_LENGTH]; TOTAL_WAVE_NUMBERS] = [[0.0; PROFILE_BUFFER_LENGTH]; TOTAL_WAVE_NUMBERS];
 
-    for theta_index in 0..DIRECTIONS {
-        let mut offset = r.random_range(0.0..TAU)/4.0;
-        offset = 0.0;
+    for wave_index in 0..TOTAL_WAVE_NUMBERS {
+        let wave_number = WAVE_NUMBERS[wave_index];
+        let angular_frequency = f32::sqrt(GRAVITY * wave_number);
+        let phase_coordinate = ((time.elapsed_secs() * TIME_MULT) * angular_frequency);
+
         for p in 0..PROFILE_BUFFER_LENGTH {
-            let phase = (p as f32 / PROFILE_BUFFER_LENGTH as f32) * TAU;
-            profile_buffer[theta_index][p] = f32::cos(phase+offset);
+            let offset = (p as f32 / PROFILE_BUFFER_LENGTH as f32) * TAU;
+            // let phase_coordinate = (wave_number*position_offset) - ((time.elapsed_secs() * TIME_MULT) * angular_frequency);
+
+            profile_buffer[wave_index][p] += f32::cos(offset-phase_coordinate);
         }
     }
+    // let mut offset = r.random_range(0.0..TAU)/4.0;
 
 
+    start_instant = Instant::now();
     for x in 0..RENDER_X_SIZE{
         for z in 0..RENDER_Z_SIZE{
             watering_stuff.height_map[x][z] = 0.0;
@@ -188,26 +205,39 @@ fn update(
                     let angular_frequency = f32::sqrt(GRAVITY * wave_number);
 
                     let phase_coordinate = (wave_number*position_offset) - ((time.elapsed_secs() * TIME_MULT) * angular_frequency);
+                    // let profile_buffer_coordinate = (wave_number*position_offset);
+                    let profile_buffer_index = ((((wave_number*position_offset)/TAU) * PROFILE_BUFFER_LENGTH as f32) as i32).rem_euclid(PROFILE_BUFFER_LENGTH as i32) as usize;
                     if (x==0&&z==0) || (x==RENDER_X_SIZE-1&&z==RENDER_Z_SIZE-1) {
                         // println!("phase_coordinate {}", (((phase_coordinate/TAU) * PROFILE_BUFFER_LENGTH as f32) as i32));
                     }
                     // watering_stuff.height_map[x][z] += amplitude * profile_buffer[theta_index][(((phase_coordinate/TAU) * PROFILE_BUFFER_LENGTH as f32) as i32).rem_euclid(PROFILE_BUFFER_LENGTH as i32) as usize];
                     // watering_stuff.height_map[x][z] += amplitude * (phase_coordinate).cos();
-                    watering_stuff.height_map[x][z] += (amplitude.x * (phase_coordinate).cos()) - (amplitude.y * (phase_coordinate).sin());
+                    // watering_stuff.height_map[x][z] += (amplitude.x * (phase_coordinate).cos()) - (amplitude.y * (phase_coordinate).sin());
+                    watering_stuff.height_map[x][z] +=
+                        (amplitude.x * profile_buffer[wave_index][profile_buffer_index]) -
+                            (amplitude.y * profile_buffer[wave_index][(profile_buffer_index+((3*PROFILE_BUFFER_LENGTH)/4))%PROFILE_BUFFER_LENGTH]);
                     // watering_stuff.height_map[x][z] += (amplitude.x * (phase_coordinate).cos());
                 }
             }
         }
     }
+    // println!("elapsed {}ms for into heightmapping", start_instant.elapsed().as_millis());
 }
 
 fn debug_update(
     mut watering_stuff: ResMut<WateringStuff>,
     mut test_resource: ResMut<WateringStuffTest>,
     key: Res<ButtonInput<KeyCode>>,
+    render_device: Res<RenderDevice>,
     mut gizmo: Gizmos,
     time: Res<Time>
 ) {
+    // let limits = render_device.limits();
+    // println!("max 1d {}",limits.max_texture_dimension_1d);
+    // println!("max 2d {}",limits.max_texture_dimension_2d);
+    // println!("max 3d {}",limits.max_texture_dimension_3d);
+    // println!("max array layers {}",limits.max_texture_array_layers);
+    // println!("has float filterable {}",render_device.features().features_wgpu.contains(WgpuFeatures::FLOAT32_FILTERABLE.features_wgpu));
 
     for x in 0..RENDER_X_SIZE {
         for z in 0..RENDER_Z_SIZE {
@@ -219,33 +249,53 @@ fn debug_update(
         }
     }
     if(key.pressed(KeyCode::KeyH)){
-        let real_x = GRID_X_SIZE as f32/2.0;
-        let real_z = GRID_Z_SIZE as f32/2.0;
+        let radius = test_resource.radius; //grid radius
+        for x_offset in -(radius.ceil() as i32)..=(radius.ceil() as i32) {
+            for z_offset in -(radius.ceil() as i32)..=(radius.ceil() as i32) {
+                let real_x = (GRID_X_SIZE as f32/2.0).round() as i32 + x_offset;
+                let real_z = (GRID_Z_SIZE as f32/2.0).round() as i32 + z_offset;
 
-        for wave_index in 0..TOTAL_WAVE_NUMBERS {
-            let wave_number = WAVE_NUMBERS[wave_index];
-            for theta_index in 0..DIRECTIONS {
-                let theta = index_to_radians(theta_index);
-                let position_offset = vec2(real_x, real_z).dot(vec2(f32::cos(theta), f32::sin(theta)));
-                let angular_frequency = f32::sqrt(GRAVITY * wave_number);
+                if(vec2(real_x as f32,real_z as f32).distance(vec2((GRID_X_SIZE as f32/2.0),(GRID_Z_SIZE as f32/2.0)))> radius){
+                    continue;
+                }
 
-                let phase_coordinate = (wave_number*position_offset) - ((time.elapsed_secs() * TIME_MULT) * angular_frequency);
-                // let phase_coordinate = wave_number * position_offset;
-                let scale = test_resource.complex_component;
-                // watering_stuff.sim_grid[GRID_X_SIZE / 2][GRID_Z_SIZE / 2][theta_index][wave_index] = vec2(10.0, TAU * (test_resource.complex_component / 16.0));
-                watering_stuff.sim_grid[GRID_X_SIZE / 2][GRID_Z_SIZE / 2][theta_index][wave_index] = vec2(scale * f32::cos(-phase_coordinate), scale * f32::sin(-phase_coordinate));
+                for wave_index in 0..TOTAL_WAVE_NUMBERS {
+                    let wave_number = WAVE_NUMBERS[wave_index];
+                    for theta_index in 0..DIRECTIONS {
+                        let theta = index_to_radians(theta_index);
+                        let position_offset = vec2(real_x as f32, real_z as f32).dot(vec2(f32::cos(theta), f32::sin(theta)));
+                        let angular_frequency = f32::sqrt(GRAVITY * wave_number);
+
+                        let phase_coordinate = (wave_number*position_offset) - ((time.elapsed_secs() * TIME_MULT) * angular_frequency);
+                        // let phase_coordinate = wave_number * position_offset;
+                        let scale = test_resource.scale;
+                        // watering_stuff.sim_grid[GRID_X_SIZE / 2][GRID_Z_SIZE / 2][theta_index][wave_index] = vec2(10.0, TAU * (test_resource.complex_component / 16.0));
+                        // watering_stuff.sim_grid[GRID_X_SIZE / 2][GRID_Z_SIZE / 2][theta_index][wave_index] = vec2(scale * f32::cos(-phase_coordinate), scale * f32::sin(-phase_coordinate));
+                        watering_stuff.sim_grid[real_x as usize][real_z as usize][theta_index][wave_index] = vec2(scale * f32::cos(-phase_coordinate), scale * f32::sin(-phase_coordinate));
+                    }
+                }
             }
         }
     }
 
     if(key.pressed(KeyCode::ArrowUp)){
-        test_resource.complex_component += 1.0;
-        println!("complex_component {}", test_resource.complex_component);
+        test_resource.scale += 1.0;
+        println!("scale {}", test_resource.scale);
     }
 
     if(key.pressed(KeyCode::ArrowDown)){
-        test_resource.complex_component -= 1.0;
-        println!("complex_component {}", test_resource.complex_component);
+        test_resource.scale -= 1.0;
+        println!("scale {}", test_resource.scale);
+    }
+
+    if(key.pressed(KeyCode::ArrowRight)){
+        test_resource.radius += 1.0;
+        println!("radius {}", test_resource.radius);
+    }
+
+    if(key.pressed(KeyCode::ArrowLeft)){
+        test_resource.radius -= 1.0;
+        println!("raidus {}", test_resource.radius);
     }
 }
 
