@@ -4,6 +4,7 @@ use std::f32::consts::TAU;
 use std::time::Instant;
 use bevy::app::{App, Plugin, Startup, Update};
 use bevy::prelude::*;
+use bevy::prelude::ops::atan2;
 use bevy::render::renderer::RenderDevice;
 use bevy::render::settings::WgpuFeatures;
 use rand::rngs::StdRng;
@@ -19,6 +20,7 @@ impl Plugin for Watering{
         app.insert_resource(WateringStuffTest {
             scale: 5.0,
             radius: 5.0,
+            spawn_center: IVec2::new(GRID_X_SIZE as i32/2,GRID_Z_SIZE as i32/2),
         });
         // app.add_systems(Startup, );
         app.add_systems(Update, (update,debug_update).chain());
@@ -38,6 +40,7 @@ const RENDER_Z_SIZE: usize = 256;
 struct WateringStuffTest {
     scale: f32,
     radius: f32,
+    spawn_center: IVec2,
 }
 
 #[derive(Resource)]
@@ -135,7 +138,10 @@ fn update(
                     let dz = ( f32::sin(theta) * (group_speed * time.delta_secs() * TIME_MULT));
                     let prev_x = (x as f32) - dx;
                     let prev_z = (z as f32) - dz;
-                    let mut new_amplitude = vec2(0.0,0.0);
+                    let prev = watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index);
+                    let phase = atan2(prev.y,prev.x);
+                    let normalized = prev.clone().normalize();
+                    // let magnitude = prev.length();
                     // prev_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32-2i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.10;
                     // prev_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32-1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.25;
                     // prev_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.30;
@@ -143,9 +149,15 @@ fn update(
                     // prev_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+2i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.10;
 
 
-                    new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32-1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.15;
-                    new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.70;
-                    new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.15;
+                    // new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32-1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.15;
+                    // new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.70;
+                    // new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.15;
+
+                    let mut new_magnitude = 0.0;
+
+                    new_magnitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32-1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index).length() * 0.15;
+                    new_magnitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index).length() * 0.70;
+                    new_magnitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index).length() * 0.15;
 
                     // new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 1.00;
 
@@ -154,6 +166,9 @@ fn update(
                     // new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x - dx, prev_z - dx, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.25;
                     // new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x + dx, prev_z + dx, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 0.25;
 
+                    let mut new_amplitude = vec2(0.0,0.0);
+                    new_amplitude = prev.clone().normalize_or(vec2(1.0,0.0))*new_magnitude;
+                    // new_amplitude = vec2(f32::cos(phase), f32::sin(phase)) * new_magnitude;
                     watering_stuff.new_sim_grid[x][z][theta_index][wave_index] = new_amplitude;
 
                     //todo do the other random stuff to make it look better later
@@ -252,26 +267,31 @@ fn debug_update(
         let radius = test_resource.radius; //grid radius
         for x_offset in -(radius.ceil() as i32)..=(radius.ceil() as i32) {
             for z_offset in -(radius.ceil() as i32)..=(radius.ceil() as i32) {
-                let real_x = (GRID_X_SIZE as f32/2.0).round() as i32 + x_offset;
-                let real_z = (GRID_Z_SIZE as f32/2.0).round() as i32 + z_offset;
+                let real_x = test_resource.spawn_center.x + x_offset;
+                let real_z = test_resource.spawn_center.y + z_offset;
 
-                if(vec2(real_x as f32,real_z as f32).distance(vec2((GRID_X_SIZE as f32/2.0),(GRID_Z_SIZE as f32/2.0)))> radius){
+                if(vec2(real_x as f32,real_z as f32).distance(vec2(test_resource.spawn_center.x as f32,test_resource.spawn_center.y as f32)) > radius){
                     continue;
                 }
 
                 for wave_index in 0..TOTAL_WAVE_NUMBERS {
                     let wave_number = WAVE_NUMBERS[wave_index];
-                    for theta_index in 0..DIRECTIONS {
-                        let theta = index_to_radians(theta_index);
-                        let position_offset = vec2(real_x as f32, real_z as f32).dot(vec2(f32::cos(theta), f32::sin(theta)));
-                        let angular_frequency = f32::sqrt(GRAVITY * wave_number);
+                    let angular_frequency = f32::sqrt(GRAVITY * wave_number);
 
-                        let phase_coordinate = (wave_number*position_offset) - ((time.elapsed_secs() * TIME_MULT) * angular_frequency);
+                    for theta_index in 0..DIRECTIONS {
+                        let mut scale = test_resource.scale;
+                        let theta = index_to_radians(theta_index);
+                        let mut position_offset = vec2(real_x as f32, real_z as f32).dot(vec2(f32::cos(theta), f32::sin(theta)));
+
+                        let mut phase_coordinate = (wave_number*position_offset) - ((time.elapsed_secs() * TIME_MULT) * angular_frequency);
+                        // let mut phase_coordinate = - ((time.elapsed_secs() * TIME_MULT) * angular_frequency);
                         // let phase_coordinate = wave_number * position_offset;
-                        let scale = test_resource.scale;
                         // watering_stuff.sim_grid[GRID_X_SIZE / 2][GRID_Z_SIZE / 2][theta_index][wave_index] = vec2(10.0, TAU * (test_resource.complex_component / 16.0));
                         // watering_stuff.sim_grid[GRID_X_SIZE / 2][GRID_Z_SIZE / 2][theta_index][wave_index] = vec2(scale * f32::cos(-phase_coordinate), scale * f32::sin(-phase_coordinate));
-                        watering_stuff.sim_grid[real_x as usize][real_z as usize][theta_index][wave_index] = vec2(scale * f32::cos(-phase_coordinate), scale * f32::sin(-phase_coordinate));
+
+                        // this only counteracts time, how to counteract position?
+                        watering_stuff.sim_grid[real_x as usize][real_z as usize][theta_index][wave_index] =
+                            vec2(scale * f32::cos(-phase_coordinate), scale * f32::sin(-phase_coordinate));
                     }
                 }
             }
@@ -296,6 +316,26 @@ fn debug_update(
     if(key.pressed(KeyCode::ArrowLeft)){
         test_resource.radius -= 1.0;
         println!("raidus {}", test_resource.radius);
+    }
+
+    if(key.pressed(KeyCode::KeyA)) {
+        test_resource.spawn_center.x -= 1;
+        println!("spawn_center {}",test_resource.spawn_center);
+    }
+
+    if(key.pressed(KeyCode::KeyD)) {
+        test_resource.spawn_center.x += 1;
+        println!("spawn_center {}",test_resource.spawn_center);
+    }
+
+    if(key.pressed(KeyCode::KeyS)) {
+        test_resource.spawn_center.y -= 1;
+        println!("spawn_center {}",test_resource.spawn_center);
+    }
+
+    if(key.pressed(KeyCode::KeyW)) {
+        test_resource.spawn_center.y += 1;
+        println!("spawn_center {}",test_resource.spawn_center);
     }
 }
 
