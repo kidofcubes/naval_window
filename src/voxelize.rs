@@ -7,6 +7,13 @@ use bevy::prelude::*;
 use bevy::mesh::{Mesh, Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::math::{Vec3A, Vec3Swizzles};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use isosurface::source::Source;
+use isosurface::marching_cubes::MarchingCubes;
+use rand::random_bool;
+
+/// Voxel bit flags
+pub const VOXEL_FILLED: u8 = 0b01;    // bit 0: filled flag (0 = empty, 1 = filled)
+pub const VOXEL_BOUNDARY: u8 = 0b10;  // bit 1: boundary flag (0 = not boundary, 1 = boundary)
 
 /// Configuration for voxelization process
 #[derive(Debug, Clone)]
@@ -32,14 +39,18 @@ impl Default for VoxelizationConfig {
 /// 3D voxel grid representation
 #[derive(Debug, Clone)]
 pub struct VoxelGrid {
-    /// 3D grid of voxels stored as flat array
-    pub voxels: Vec<bool>,
+    /// 3D grid of voxels stored as flat array (u8 with bit flags)
+    pub voxels: Vec<u8>,
     /// Grid dimensions (width, height, depth)
     pub dimensions: (u32, u32, u32),
     /// minimum position of the voxel grid
     pub offset: Vec3A,
     /// Size of each voxel in world units
     pub voxel_size: f32,
+    /// Boundary mesh vertices (in world space) from isosurface extraction
+    pub boundary_vertices: Option<Vec<Vec3A>>,
+    /// Boundary mesh indices (triangles)
+    pub boundary_indices: Option<Vec<u32>>,
 }
 
 impl VoxelGrid {
@@ -49,13 +60,15 @@ impl VoxelGrid {
         let voxel_size = calculate_voxel_size(dimensions);
 
         Self {
-            voxels: vec![false; voxel_count],
+            voxels: vec![0u8; voxel_count],
             dimensions,
             offset,
             voxel_size,
+            boundary_vertices: None,
+            boundary_indices: None,
         }
     }
-    
+
     /// Get the linear index for a 3D coordinate
     pub fn get_index(&self, x: u32, y: u32, z: u32) -> Option<usize> {
         if x < self.dimensions.0 && y < self.dimensions.1 && z < self.dimensions.2 {
@@ -64,20 +77,127 @@ impl VoxelGrid {
             None
         }
     }
-    
-    /// Set a voxel at the given coordinates
+
+    /// Get the raw u8 value at the given coordinates
+    pub fn get_voxel(&self, x: u32, y: u32, z: u32) -> Option<u8> {
+        self.get_index(x, y, z).map(|index| self.voxels[index])
+    }
+
+    /// Set a voxel filled flag at the given coordinates
     pub fn set_voxel(&mut self, x: u32, y: u32, z: u32, filled: bool) -> bool {
         if let Some(index) = self.get_index(x, y, z) {
-            self.voxels[index] = filled;
+            if filled {
+                self.voxels[index] |= VOXEL_FILLED;
+            } else {
+                self.voxels[index] &= !VOXEL_FILLED;
+            }
             true
         } else {
             false
         }
     }
-    
+
     /// Check if a voxel is filled at the given coordinates
     pub fn is_filled(&self, x: u32, y: u32, z: u32) -> Option<bool> {
-        self.get_index(x, y, z).map(|index| self.voxels[index])
+        self.get_index(x, y, z).map(|index| (self.voxels[index] & VOXEL_FILLED) != 0)
+    }
+
+    /// Set the boundary flag at the given coordinates
+    pub fn set_boundary(&mut self, x: u32, y: u32, z: u32) -> bool {
+        if let Some(index) = self.get_index(x, y, z) {
+            self.voxels[index] |= VOXEL_BOUNDARY;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Check if a voxel is a boundary voxel
+    pub fn is_boundary(&self, x: u32, y: u32, z: u32) -> Option<bool> {
+        self.get_index(x, y, z).map(|index| (self.voxels[index] & VOXEL_BOUNDARY) != 0)
+    }
+}
+
+/// Implement Source trait for isosurface extraction
+impl Source for VoxelGrid {
+    fn sample(&self, x: f32, y: f32, z: f32) -> f32 {
+        // Convert normalized [0,1] coords to voxel coords
+        let vx = (x * self.dimensions.0 as f32) as i32;
+        let vy = (y * self.dimensions.1 as f32) as i32;
+        let vz = (z * self.dimensions.2 as f32) as i32;
+
+        if (vx < 0 || vy < 0 || vz < 0 || vx >= self.dimensions.0 as i32 || vy >= self.dimensions.1 as i32 || vz >= self.dimensions.2 as i32) {
+            return 10.0;
+        }
+
+    // Clamp to valid range
+        let vx = (vx as u32).min(self.dimensions.0.saturating_sub(1));
+        let vy = (vy as u32).min(self.dimensions.1.saturating_sub(1));
+        let vz = (vz as u32).min(self.dimensions.2.saturating_sub(1));
+
+        // Return negative if filled (inside), positive if empty (outside)
+        if self.is_filled(vx, vy, vz).unwrap_or(false) {
+            // -1.0
+            // -1.5
+            -0.25 / 2.0
+        } else {
+            // 1.0
+            // 0.5
+            1.75 * 2.0
+        }
+
+        // // // Convert normalized [0,1] coords to voxel coords
+        // // let vx = (x * (self.dimensions.0) as f32) as u32;
+        // // let vy = (y * (self.dimensions.1) as f32) as u32;
+        // // let vz = (z * (self.dimensions.2) as f32) as u32;
+        // //
+        // // // Clamp to valid range
+        // // let vx = vx.min(self.dimensions.0.saturating_sub(1));
+        // // let vy = vy.min(self.dimensions.1.saturating_sub(1));
+        // // let vz = vz.min(self.dimensions.2.saturating_sub(1));
+        // //
+        // // // Return negative if filled (inside), positive if empty (outside)
+        // // if (
+        // //         self.is_filled(vx+0, vy+0, vz+0).unwrap_or(false) &&
+        // //         self.is_filled(vx+0, vy+0, vz+1).unwrap_or(false) &&
+        // //         self.is_filled(vx+0, vy+1, vz+0).unwrap_or(false) &&
+        // //         self.is_filled(vx+0, vy+1, vz+1).unwrap_or(false) &&
+        // //         self.is_filled(vx+1, vy+0, vz+0).unwrap_or(false) &&
+        // //         self.is_filled(vx+1, vy+0, vz+1).unwrap_or(false) &&
+        // //         self.is_filled(vx+1, vy+1, vz+0).unwrap_or(false) &&
+        // //         self.is_filled(vx+1, vy+1, vz+1).unwrap_or(false)
+        // // ) {
+        // //     -1.0
+        // // } else {
+        // //     1.0
+        // // }
+        //
+        // // Convert normalized [0,1] coords to voxel coords
+        // let sub_vx = (x * ((self.dimensions.0 as f32*2.0)-1.0)) as u32;
+        // let sub_vy = (y * ((self.dimensions.1 as f32*2.0)-1.0)) as u32;
+        // let sub_vz = (z * ((self.dimensions.2 as f32*2.0)-1.0)) as u32;
+        //
+        // // Clamp to valid range
+        // let sub_vx = sub_vx.min(self.dimensions.0.saturating_sub(1)*2);
+        // let sub_vy = sub_vy.min(self.dimensions.1.saturating_sub(1)*2);
+        // let sub_vz = sub_vz.min(self.dimensions.2.saturating_sub(1)*2);
+        //
+        // let vx = sub_vx/2;
+        // let vy = sub_vy/2;
+        // let vz = sub_vz/2;
+        //
+        // // Return negative if filled (inside), positive if empty (outside)
+        // if self.is_filled(vx, vy, vz).unwrap_or(false) {
+        //     //we are in a filled, now to check if we're in the middle
+        //     if (vx*2 == (sub_vx-1) && vy*2 == (sub_vy-1) && vz*2 == (sub_vz-1)) {
+        //         //yes if in the middle of a filled
+        //         return -1.0;
+        //     }
+        //
+        //     -1.0
+        // } else {
+        //     1.0
+        // }
     }
 }
 
@@ -96,19 +216,132 @@ pub fn render_voxel_grid(grid: &VoxelGrid, gizmo: &mut Gizmos) {
     for z in 0..grid.dimensions.2 {
         for y in 0..grid.dimensions.1 {
             for x in 0..grid.dimensions.0 {
-                if let Some(true) = grid.is_filled(x, y, z) {
-                    let world_pos = offset + Vec3A::new(
-                        (x as f32 + 0.5) * voxel_size,
-                        (y as f32 + 0.5) * voxel_size,
-                        (z as f32 + 0.5) * voxel_size,
-                    );
+                let voxel = grid.get_voxel(x, y, z).unwrap_or(0);
+                let is_filled = (voxel & VOXEL_FILLED) != 0;
+                let is_boundary = (voxel & VOXEL_BOUNDARY) != 0;
 
-                    // Draw wireframe cube for each filled voxel
-                    gizmo.cube(
-                        Transform::from_translation(world_pos.into())
-                            .with_scale(Vec3::splat(voxel_size * 0.95)), // Slightly smaller for visual clarity
-                        Color::srgba(0.0, 1.0, 0.0, 0.3), // Semi-transparent green
-                    );
+                // Skip empty non-boundary voxels
+                if !is_filled && !is_boundary {
+                    continue;
+                }
+
+                let world_pos = offset + Vec3A::new(
+                    (x as f32 + 0.5) * voxel_size,
+                    (y as f32 + 0.5) * voxel_size,
+                    (z as f32 + 0.5) * voxel_size,
+                );
+
+                // Choose color based on voxel state
+                let color = if is_filled && is_boundary {
+                    // Boundary filled voxels: red
+                    Color::srgba(1.0, 0.0, 0.0, 0.3)
+                } else if is_filled {
+                    // Interior filled voxels: green
+                    Color::srgba(0.0, 1.0, 0.0, 0.3)
+                } else {
+                    // Boundary empty voxels: yellow (for debugging)
+                    Color::srgba(1.0, 1.0, 0.0, 0.2)
+                };
+
+                // Draw wireframe cube
+                gizmo.cube(
+                    Transform::from_translation(world_pos.into())
+                        .with_scale(Vec3::splat(voxel_size * 0.95)),
+                    color,
+                );
+            }
+        }
+    }
+
+    // Render boundary mesh if it exists
+    if let (Some(vertices), Some(indices)) = (&grid.boundary_vertices, &grid.boundary_indices) {
+        let mesh_color = Color::srgba(0.0, 0.5, 1.0, 0.5); // Semi-transparent cyan
+
+        // Draw each triangle as wireframe lines
+        for tri in indices.chunks(3) {
+            if tri.len() != 3 || random_bool(0.95){
+                continue;
+            }
+            let v0: Vec3 = vertices[tri[0] as usize].into();
+            let v1: Vec3 = vertices[tri[1] as usize].into();
+            let v2: Vec3 = vertices[tri[2] as usize].into();
+
+            // Draw the three edges of the triangle
+            gizmo.line(v0, v1, mesh_color);
+            gizmo.line(v1, v2, mesh_color);
+            gizmo.line(v2, v0, mesh_color);
+        }
+    }
+}
+
+/// Mark boundary voxels using isosurface extraction
+pub fn mark_boundary_voxels(grid: &mut VoxelGrid) {
+    let size = grid.dimensions.0.max(grid.dimensions.1).max(grid.dimensions.2) as usize;
+    let mut mc = MarchingCubes::new(size);
+
+    let mut vertices: Vec<f32> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    mc.extract(grid, &mut vertices, &mut indices);
+
+    // Convert all vertices from normalized [0,1] space to world space and store
+    let num_vertices = vertices.len() / 3;
+    let mut world_vertices: Vec<Vec3A> = Vec::with_capacity(num_vertices);
+    for i in 0..num_vertices {
+        let x = vertices[i * 3];
+        let y = vertices[i * 3 + 1];
+        let z = vertices[i * 3 + 2];
+        world_vertices.push(Vec3A::new(
+            grid.offset.x + x * (grid.dimensions.0 as f32) * grid.voxel_size,
+            grid.offset.y + y * (grid.dimensions.1 as f32) * grid.voxel_size,
+            grid.offset.z + z * (grid.dimensions.2 as f32) * grid.voxel_size,
+        ));
+    }
+
+    // For each triangle in the boundary mesh
+    for tri in indices.chunks(3) {
+        if tri.len() != 3 {
+            continue;
+        }
+        let v0 = world_vertices[tri[0] as usize];
+        let v1 = world_vertices[tri[1] as usize];
+        let v2 = world_vertices[tri[2] as usize];
+
+        // Mark voxels intersecting this triangle with VOXEL_BOUNDARY bit
+        mark_triangle_voxels_boundary(grid, v0, v1, v2);
+    }
+
+    // Store the boundary mesh in the grid
+    grid.boundary_vertices = Some(world_vertices);
+    grid.boundary_indices = Some(indices);
+}
+
+/// Mark voxels that intersect a boundary triangle
+fn mark_triangle_voxels_boundary(grid: &mut VoxelGrid, v0: Vec3A, v1: Vec3A, v2: Vec3A) {
+    // Calculate triangle bounding box in voxel coordinates
+    let min_world = v0.min(v1).min(v2);
+    let max_world = v0.max(v1).max(v2);
+
+    let min_voxel = world_to_voxel(grid, min_world);
+    let max_voxel = world_to_voxel(grid, max_world);
+
+    // Clamp to grid bounds and add 1-voxel padding for safety
+    let start_x = (min_voxel.x - 1).max(0);
+    let start_y = (min_voxel.y - 1).max(0);
+    let start_z = (min_voxel.z - 1).max(0);
+    let end_x = (max_voxel.x + 2).min(grid.dimensions.0 as i32);
+    let end_y = (max_voxel.y + 2).min(grid.dimensions.1 as i32);
+    let end_z = (max_voxel.z + 2).min(grid.dimensions.2 as i32);
+
+    // Test each voxel in the bounding box
+    for z in start_z..end_z {
+        for y in start_y..end_y {
+            for x in start_x..end_x {
+                let voxel_center = voxel_to_world(grid, x, y, z);
+                let half_size = grid.voxel_size * 0.5;
+
+                // Test if triangle intersects this voxel
+                if triangle_box_intersection(v0, v1, v2, voxel_center, half_size) {
+                    grid.set_boundary(x as u32, y as u32, z as u32);
                 }
             }
         }
@@ -160,16 +393,21 @@ pub fn voxelize_meshes(
     );
 
     let mut grid = VoxelGrid {
-        voxels: vec![false; (dimensions.0 * dimensions.1 * dimensions.2) as usize],
+        voxels: vec![0u8; (dimensions.0 * dimensions.1 * dimensions.2) as usize],
         dimensions,
         offset: min_bound,
         voxel_size,
+        boundary_vertices: None,
+        boundary_indices: None,
     };
 
     // Step 3: Conservative voxelization - mark any voxel a triangle touches
     for (mesh, transform) in &mesh_transform_pairs {
         voxelize_mesh_conservative(&mut grid, mesh, transform);
     }
+
+    // Step 4: Mark boundary voxels using isosurface extraction
+    mark_boundary_voxels(&mut grid);
 
     grid
 }
@@ -373,11 +611,10 @@ pub fn create_voxel_texture(
 ) -> Handle<Image> {
     let (width, height, depth) = grid.dimensions;
 
-    // Convert bool voxels to R8Uint texture data
-    let data: Vec<u8> = grid.voxels.iter().map(|&filled| if filled { 255 } else { 0 }).collect();
-    // let data: Vec<u32> = grid.voxels.iter().map(|&filled| if filled { 255 } else { 0 }).collect();
+    // Use raw u8 voxel data directly (contains bit flags for filled/boundary)
+    let data: Vec<u8> = grid.voxels.clone();
 
-    let mut image = Image::new(
+    let image = Image::new(
         Extent3d {
             width,
             height,

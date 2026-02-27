@@ -83,7 +83,7 @@ fn temp_test_update(
             let config = VoxelizationConfig {
                 resolution: 64,
                 min_voxel_size: Some(0.25),
-                max_voxel_size: Some(0.25),
+                max_voxel_size: Some(1.00),
             };
             
             // Voxelize the meshes
