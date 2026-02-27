@@ -1,4 +1,4 @@
-mod pipeline;
+mod compute_shader;
 
 use std::f32::consts::TAU;
 use std::time::Instant;
@@ -50,12 +50,12 @@ impl Plugin for Watering{
             .add_systems(
                 Render,
                 (
-                    pipeline::prepare_gpu_resources
+                    compute_shader::prepare_gpu_resources
                         .in_set(RenderSystems::PrepareResources),
                     // pipeline::upload_obstacle_mask
                     //     .in_set(RenderSystems::PrepareResources)
                     //     .after(resources::prepare_gpu_resources),
-                    pipeline::queue_bind_groups
+                    compute_shader::queue_bind_groups
                         .in_set(RenderSystems::Queue),
                 ),
             );
@@ -63,19 +63,19 @@ impl Plugin for Watering{
         // use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
         // use bevy::render::render_graph::RenderGraphApp;
         render_app
-            .add_render_graph_node::<pipeline::WaterSimulationNode>(
+            .add_render_graph_node::<compute_shader::WaterSimulationNode>(
                 Core3d,
-                pipeline::WaterNodeLabel,
+                compute_shader::WaterNodeLabel,
             )
             // Run our compute passes before the main 3D pass
-            .add_render_graph_edge(Core3d, pipeline::WaterNodeLabel, Node3d::EarlyPrepass);
+            .add_render_graph_edge(Core3d, compute_shader::WaterNodeLabel, Node3d::EarlyPrepass);
     }
 
     fn finish(&self, app: &mut App) {
         // Pipeline creation needs the RenderDevice, which is only available
         // after the renderer is initialised (in `finish`).
         let render_app = app.sub_app_mut(RenderApp);
-        render_app.init_resource::<pipeline::WaterPipelines>();
+        render_app.init_resource::<compute_shader::WaterPipelines>();
     }
 }
 

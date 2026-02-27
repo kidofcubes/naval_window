@@ -328,7 +328,7 @@ fn main() {
             // The global wireframe config enables drawing of wireframes on every mesh,
             // except those with `NoWireframe`. Meshes with `Wireframe` will always have a wireframe,
             // regardless of the global configuration.
-            global: true,
+            global: false,
             // Controls the default color of all wireframes. Used as the default color for global wireframes.
             // Can be changed per mesh using the `WireframeColor` component.
             default_color: Color::WHITE,
@@ -340,9 +340,9 @@ fn main() {
         .add_plugins((
             // WebAssetPlugin,
             default_plugins,
-            // NavalSketchPlugin{
-            //     init_paths: data_paths.unwrap(),
-            // },
+            NavalSketchPlugin{
+                init_paths: data_paths.unwrap(),
+            },
             WireframePlugin::default(),
             WaterPlugin,
             CameraMovementPlugin,
