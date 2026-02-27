@@ -3,29 +3,123 @@ mod pipeline;
 use std::f32::consts::TAU;
 use std::time::Instant;
 use bevy::app::{App, Plugin, Startup, Update};
+use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
 use bevy::prelude::*;
 use bevy::prelude::ops::atan2;
+use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::renderer::RenderDevice;
-use bevy::render::settings::WgpuFeatures;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use bevy::render::render_resource::{Extent3d, ShaderType, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages};
+use bevy::render::{Render, RenderApp, RenderSystems};
+use bevy::render::render_graph::RenderGraphExt;
 
 pub struct Watering;
 impl Plugin for Watering{
+    // fn build(&self, app: &mut App) {
+    //     // app.add_plugins(MaterialPlugin::<CustomMaterial>{
+    //     //     ..default()
+    //     // });
+    //     app.insert_resource(WateringStuff::default());
+    //     app.insert_resource(WateringStuffTest {
+    //         scale: 5.0,
+    //         radius: 5.0,
+    //         spawn_center: IVec2::new(GRID_X_SIZE as i32/2,GRID_Z_SIZE as i32/2),
+    //     });
+    //     // app.add_systems(Startup, );
+    //     app.add_systems(Update, (update,debug_update).chain());
+    // }
     fn build(&self, app: &mut App) {
-        // app.add_plugins(MaterialPlugin::<CustomMaterial>{
-        //     ..default()
-        // });
-        app.insert_resource(WateringStuff::default());
-        app.insert_resource(WateringStuffTest {
-            scale: 5.0,
-            radius: 5.0,
-            spawn_center: IVec2::new(GRID_X_SIZE as i32/2,GRID_Z_SIZE as i32/2),
-        });
-        // app.add_systems(Startup, );
-        app.add_systems(Update, (update,debug_update).chain());
+        app
+            .insert_resource(WaterSettings {
+                height_scale: 1.0,
+                time_scale: 3.0,
+                delta_time: 0.0,
+                elapsed_time: 0.0,
+            })
+            .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
+            .add_plugins(ExtractResourcePlugin::<HeightFieldHandle>::default())
+            .add_systems(Startup, (temp_setup))
+        // Advance simulation time each frame
+        // .add_systems(Update, (tick_water_time, sync_ship_position))
+        ;
+
+        let render_app = app.sub_app_mut(RenderApp);
+        render_app
+            // .init_resource::<WaterSettings>()
+            .add_systems(Update, (tick_water_time))
+            .add_systems(
+                Render,
+                (
+                    pipeline::prepare_gpu_resources
+                        .in_set(RenderSystems::PrepareResources),
+                    // pipeline::upload_obstacle_mask
+                    //     .in_set(RenderSystems::PrepareResources)
+                    //     .after(resources::prepare_gpu_resources),
+                    pipeline::queue_bind_groups
+                        .in_set(RenderSystems::Queue),
+                ),
+            );
+
+        // use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
+        // use bevy::render::render_graph::RenderGraphApp;
+        render_app
+            .add_render_graph_node::<pipeline::WaterSimulationNode>(
+                Core3d,
+                pipeline::WaterNodeLabel,
+            )
+            // Run our compute passes before the main 3D pass
+            .add_render_graph_edge(Core3d, pipeline::WaterNodeLabel, Node3d::EarlyPrepass);
+    }
+
+    fn finish(&self, app: &mut App) {
+        // Pipeline creation needs the RenderDevice, which is only available
+        // after the renderer is initialised (in `finish`).
+        let render_app = app.sub_app_mut(RenderApp);
+        render_app.init_resource::<pipeline::WaterPipelines>();
     }
 }
+
+
+pub fn temp_setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    // mut water_material: ResMut<Assets<water_stuff::ocean_mesh::WaterMaterial>>,
+    // mut hf_handle: ResMut<HeightFieldHandle>,
+    // mut commands: Commands,
+){
+    let hf_image = Image {
+        texture_descriptor: TextureDescriptor {
+            label:               Some("height_field_mat"),
+            size:                Extent3d { width: RENDER_X_SIZE as u32, height: RENDER_Z_SIZE as u32, depth_or_array_layers: 1 },
+            mip_level_count:     1,
+            sample_count:        1,
+            dimension:           TextureDimension::D2,
+            format:              TextureFormat::R32Float,
+            usage:               TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::STORAGE_BINDING,
+            view_formats:        &[],
+        },
+        data: Some(vec![0u8; (RENDER_X_SIZE * RENDER_Z_SIZE * 4) as usize]),
+        ..default()
+    };
+    // hf_handle.0=images.add(hf_image);
+    commands.insert_resource(HeightFieldHandle{handle: images.add(hf_image)})
+
+
+    // spawn_water_mesh(&mut commands, &mut meshes, &mut water_material, &mut images);
+}
+
+// ─── Update Systems ──────────────────────────────────────────────────────────
+
+fn tick_water_time(time: Res<Time>, mut settings: ResMut<WaterSettings>) {
+    settings.elapsed_time = time.elapsed_secs();
+    settings.delta_time = time.delta_secs().clamp(0.0, 1.0 / 30.0);
+}
+
+
 const GRID_X_SIZE: usize = 128;
 const GRID_Z_SIZE: usize = 128;
 const DIRECTIONS: usize = 64;
@@ -60,7 +154,7 @@ impl Default for WateringStuff {
             // sim_grid: [[[[0.0; TOTAL_WAVE_NUMBERS]; DIRECTIONS]; GRID_Z_SIZE]; GRID_X_SIZE],
             // sim_grid: sim_grid.try_into().unwrap(),
             sim_grid: Box::new([[[[vec2(0.0,0.0); TOTAL_WAVE_NUMBERS]; DIRECTIONS]; GRID_Z_SIZE]; GRID_X_SIZE]),
-            // new_sim_grid: [[[[0.0; TOTAL_WAVE_NUMBERS]; DIRECTIONS]; GRID_Z_SIZE]; GRID_X_SIZE],
+            // new_sim_grid: [[[[0.0; TOTAL_WAVE_NUMBERS]; DIRECTIONS]ve ; GRID_Z_SIZE]; GRID_X_SIZE],
             // new_sim_grid: new_sim_grid.try_into().unwrap(),
             new_sim_grid: Box::new([[[[vec2(0.0,0.0); TOTAL_WAVE_NUMBERS]; DIRECTIONS]; GRID_Z_SIZE]; GRID_X_SIZE]),
             // height_map: [[0.0; RENDER_Z_SIZE]; RENDER_X_SIZE],
@@ -342,4 +436,19 @@ fn debug_update(
 
 fn index_to_radians(i: usize) -> f32{
     return i as f32 * (std::f32::consts::TAU / DIRECTIONS as f32);
+}
+
+//to be put in main world
+#[derive(Resource, ExtractResource, Clone, ShaderType)]
+pub struct WaterSettings {
+    pub height_scale: f32,
+    pub time_scale: f32,
+    pub delta_time: f32,
+    pub elapsed_time: f32,
+}
+
+//to be put in main world
+#[derive(Resource, ExtractResource, Clone)]
+pub struct HeightFieldHandle {
+    pub handle: Handle<Image>
 }

@@ -1,28 +1,17 @@
 use bevy::prelude::*;
-use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph;
 use bevy::render::render_graph::{NodeRunError, RenderGraphContext, RenderLabel};
-use bevy::render::render_resource::{encase, AddressMode, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, Extent3d, FilterMode, PipelineCache, SamplerDescriptor, ShaderStages, ShaderType, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
-use bevy::render::render_resource::binding_types::{texture_storage_2d, texture_storage_2d_array, uniform_buffer};
+use bevy::render::render_resource::{encase, AddressMode, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, Extent3d, FilterMode, PipelineCache, SamplerDescriptor, ShaderStages, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
+use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, texture_storage_2d, texture_storage_2d_array, uniform_buffer};
+use bevy::render::render_resource::Sampler;
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
-use crate::watering::{DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_WAVE_NUMBERS};
-
-#[derive(Resource, ExtractResource, Clone, ShaderType)]
-struct WaterSettings {
-    pub height_scale: f32,
-    pub time_scale: f32,
-}
-
-#[derive(Resource, ExtractResource, Clone)]
-struct HeightFieldHandle {
-    pub handle: Handle<Image>
-}
+use crate::watering::{HeightFieldHandle, WaterSettings, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_WAVE_NUMBERS};
 
 // ─── GPU Resources ────────────────────────────────────────────────────────────
 
-/// All GPU textures owned by the water simulation.
+/// to be put in render world
 #[derive(Resource)]
 pub struct WaterGpuResources {
     // ── Amplitude ping-pong ────────────────────────────────────────────────
@@ -35,6 +24,10 @@ pub struct WaterGpuResources {
     pub amplitude_b_view: TextureView,
     /// false → A is read, B is write.  true → B is read, A is write.
     pub flip: bool,
+
+    // ── Amplitude sampler ──────────────────────────────────────────────────
+    // Linear filtering sampler for bilinear interpolation of amplitude textures.
+    pub amplitude_sampler: Sampler,
 
     // ── Profile buffer ─────────────────────────────────────────────────────
     // 1-D R32Float texture (stored as 1 × PROFILE_SIZE).
@@ -159,7 +152,7 @@ pub fn prepare_gpu_resources(
         sample_count:        1,
         dimension:           TextureDimension::D2,
         format:              TextureFormat::Rg32Float,
-        usage:               TextureUsages::STORAGE_BINDING | TextureUsages::COPY_DST,
+        usage:               TextureUsages::STORAGE_BINDING | TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING,
         view_formats:        &[],
     };
     let array_view_desc = TextureViewDescriptor {
@@ -171,6 +164,16 @@ pub fn prepare_gpu_resources(
     let amplitude_a_view = amplitude_a.create_view(&array_view_desc);
     let amplitude_b      = render_device.create_texture(&TextureDescriptor { label: Some("amp_b"), ..amp_desc });
     let amplitude_b_view = amplitude_b.create_view(&array_view_desc);
+
+    // ── Amplitude sampler ─────────────────────────────────────────────────
+    let amplitude_sampler = render_device.create_sampler(&SamplerDescriptor {
+        label:           Some("amplitude_sampler"),
+        address_mode_u:  AddressMode::ClampToEdge,
+        address_mode_v:  AddressMode::ClampToEdge,
+        mag_filter:      FilterMode::Linear,
+        min_filter:      FilterMode::Linear,
+        ..default()
+    });
 
     // ── Profile buffer ─────────────────────────────────────────────────────
     let profile_buf = render_device.create_texture(&TextureDescriptor {
@@ -215,11 +218,9 @@ pub fn prepare_gpu_resources(
         amplitude_b,
         amplitude_b_view,
         flip: false,
+        amplitude_sampler,
         profile_buf,
         profile_buf_view,
-        // height_field,
-        // height_field_view,
-        // height_field_sampler,
     });
 }
 
@@ -249,21 +250,19 @@ impl FromWorld for WaterPipelines {
         let pipeline_cache = world.resource::<PipelineCache>();
 
         // ── Advection layout ───────────────────────────────────────────────
-        // Binding 0 : amplitude_in  (Texture2DArray, ReadOnly storage)
-        // Binding 1 : amplitude_out (Texture2DArray, WriteOnly storage)
-        // Binding 2 : settings      (Uniform buffer)
-        // let advection_layout = device.create_bind_group_layout(
+        // Binding 0 : amplitude_in  (Texture2DArray, sampled)
+        // Binding 1 : amplitude_sampler (Sampler)
+        // Binding 2 : amplitude_out (Texture2DArray, WriteOnly storage)
+        // Binding 3 : settings      (Uniform buffer)
         let advection_layout = BindGroupLayoutDescriptor::new(
             "advection_layout",
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::COMPUTE,
                 (
+                    texture_2d_array(bevy::render::render_resource::TextureSampleType::Float { filterable: true }),
+                    sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
                     texture_storage_2d_array(
-                        TextureFormat::R32Float,
-                        StorageTextureAccess::ReadOnly,
-                    ),
-                    texture_storage_2d_array(
-                        TextureFormat::R32Float,
+                        TextureFormat::Rg32Float,
                         StorageTextureAccess::WriteOnly,
                     ),
                     uniform_buffer::<WaterSettings>(false),
@@ -290,20 +289,18 @@ impl FromWorld for WaterPipelines {
         );
 
         // ── Height layout ──────────────────────────────────────────────────
-        // Binding 0 : amplitude (Texture2DArray, ReadOnly)
-        // Binding 1 : profile   (Texture2D, ReadOnly)
-        // Binding 2 : height out (Texture2D, WriteOnly)
-        // Binding 3 : settings  (Uniform)
-        // let height_layout = device.create_bind_group_layout(
+        // Binding 0 : amplitude (Texture2DArray, sampled)
+        // Binding 1 : amplitude_sampler (Sampler)
+        // Binding 2 : profile   (Texture2D, ReadOnly storage)
+        // Binding 3 : height out (Texture2D, WriteOnly storage)
+        // Binding 4 : settings  (Uniform)
         let height_layout = BindGroupLayoutDescriptor::new(
             "height_layout",
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::COMPUTE,
                 (
-                    texture_storage_2d_array(
-                        TextureFormat::R32Float,
-                        StorageTextureAccess::ReadOnly,
-                    ),
+                    texture_2d_array(bevy::render::render_resource::TextureSampleType::Float { filterable: true }),
+                    sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
                     texture_storage_2d(
                         TextureFormat::R32Float,
                         StorageTextureAccess::ReadOnly,
@@ -427,6 +424,7 @@ pub fn queue_bind_groups(
         &pipeline_cache.get_bind_group_layout(&pipelines.advection_layout),
         &BindGroupEntries::sequential((
             amp_read,
+            &gpu.amplitude_sampler,
             amp_write,
             settings_buf.as_entire_binding(),
         )),
@@ -447,6 +445,7 @@ pub fn queue_bind_groups(
         &pipeline_cache.get_bind_group_layout(&pipelines.height_layout),
         &BindGroupEntries::sequential((
             amp_write,
+            &gpu.amplitude_sampler,
             &gpu.profile_buf_view,
             height_write_view,
             settings_buf.as_entire_binding(),

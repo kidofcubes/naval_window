@@ -8,9 +8,9 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension, TextureFormat};
 use bevy::shader::{ShaderDefVal, ShaderRef};
 use rand::{random, random_bool, random_range};
-use crate::BuildData;
+use crate::{watering, BuildData};
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
-use crate::watering::Watering;
+use crate::watering::{HeightFieldHandle, Watering};
 
 const SHADER_ASSET_PATH: &str = "custom_material.wgsl";
 
@@ -26,7 +26,7 @@ impl Plugin for WaterPlugin {
         });
 
         app.add_plugins(Watering);
-        app.add_systems(Startup, setup);
+        app.add_systems(Startup, setup.after(watering::temp_setup));
         app.add_systems(Update, update);
     }
 }
@@ -39,6 +39,7 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut custom_materials: ResMut<Assets<CustomMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut height_field_handle: ResMut<HeightFieldHandle>,
     asset_server: Res<AssetServer>,
 ) {
 
@@ -72,6 +73,8 @@ fn setup(
             voxel_transform: Mat4::IDENTITY,
             voxel_size: 0.5,
             voxel_grid: null_texture(images.as_mut(), TextureDimension::D3, TextureFormat::R8Uint),
+            height_map: height_field_handle.handle.clone(),
+
         })),
         // NoFrustumCulling,
         Transform::from_xyz(0.0, 0.0, 0.0),
@@ -115,6 +118,11 @@ pub struct CustomMaterial {
     #[texture(3, dimension = "3d", sample_type = "u_int")]
     // #[sampler(3)]
     voxel_grid: Handle<Image>,
+
+
+    #[texture(5, dimension = "2d", sample_type = "float")]
+    #[sampler(6)]
+    height_map: Handle<Image>,
 
     // #[uniform(0)]
     // color: LinearRgba,

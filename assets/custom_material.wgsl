@@ -33,6 +33,9 @@ struct VertexOutput {
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> voxel_size: f32;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var voxel_texture: texture_3d<u32>;
 
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var height_field: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(6) var height_field_sampler: sampler;
+
 
 const PI = 3.1415926538;
 const TAU = PI * 2;
