@@ -14,6 +14,7 @@ anyhow = {  version = "1.0.101" , features = ["backtrace"]}
 dirs = "6.0.0"
 rand = "0.9.2"
 isosurface = "0.0.4"
+meshopt = "0.6.2"
 
 
 # Enable max optimizations for dependencies, but not for our code:

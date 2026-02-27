@@ -1,0 +1,231 @@
+//! Mesh optimization module for combining and simplifying ship meshes
+//!
+//! This module provides functionality to combine multiple mesh parts into a single mesh
+//! and simplify them using the meshopt library for reduced triangle counts.
+
+use bevy::prelude::*;
+use bevy::mesh::{Mesh, Indices, PrimitiveTopology, VertexAttributeValues};
+use bevy::asset::RenderAssetUsages;
+use meshopt::{simplify_sloppy, typed_to_bytes, VertexDataAdapter};
+
+/// Vertex struct for meshopt processing
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct Vertex {
+    position: [f32; 3],
+}
+
+/// Combine multiple meshes with their transforms into a single mesh
+///
+/// Each mesh is transformed to world space using its associated GlobalTransform,
+/// and all vertices and indices are accumulated into a single combined mesh.
+pub fn combine_meshes(
+    mesh_transform_pairs: &[(&Mesh, &GlobalTransform)],
+) -> Option<Mesh> {
+    if mesh_transform_pairs.is_empty() {
+        return None;
+    }
+
+    let mut all_vertices: Vec<[f32; 3]> = Vec::new();
+    let mut all_indices: Vec<u32> = Vec::new();
+
+    for (mesh, transform) in mesh_transform_pairs {
+        // Extract positions
+        let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(VertexAttributeValues::Float32x3(p)) => p,
+            _ => continue,
+        };
+
+        // Get current vertex offset for index remapping
+        let vertex_offset = all_vertices.len() as u32;
+
+        // Transform vertices to world space and add
+        for pos in positions {
+            let world_pos = transform.transform_point(Vec3::from(*pos));
+            all_vertices.push([world_pos.x, world_pos.y, world_pos.z]);
+        }
+
+        // Extract and offset indices
+        let indices: Vec<u32> = match mesh.indices() {
+            Some(Indices::U32(idx)) => idx.clone(),
+            Some(Indices::U16(idx)) => idx.iter().map(|&i| i as u32).collect(),
+            None => {
+                // No indices means sequential vertices for triangle list
+                if mesh.primitive_topology() == PrimitiveTopology::TriangleList {
+                    (0..positions.len() as u32).collect()
+                } else {
+                    continue;
+                }
+            }
+        };
+
+        for idx in indices {
+            all_indices.push(idx + vertex_offset);
+        }
+    }
+
+    if all_vertices.is_empty() || all_indices.is_empty() {
+        return None;
+    }
+
+    // Build combined mesh
+    let mut combined = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::all(),
+    );
+    combined.insert_attribute(Mesh::ATTRIBUTE_POSITION, all_vertices);
+    combined.insert_indices(Indices::U32(all_indices));
+    combined.compute_flat_normals();
+
+    Some(combined)
+}
+
+/// Simplify a mesh using meshopt
+///
+/// The target_ratio parameter controls how much to simplify:
+/// - 1.0 = keep all triangles
+/// - 0.5 = target 50% of original triangles
+/// - 0.1 = target 10% of original triangles
+///
+/// Note: The actual result may have more triangles than requested if
+/// simplifying further would cause too much visual degradation.
+pub fn simplify_mesh(
+    mesh: &Mesh,
+    target_ratio: f32,
+) -> Option<Mesh> {
+    // Clamp target_ratio to valid range
+    let target_ratio = target_ratio.clamp(0.0, 1.0);
+
+    // Extract vertices
+    let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(VertexAttributeValues::Float32x3(p)) => p,
+        _ => return None,
+    };
+
+    // Extract indices
+    let indices: Vec<u32> = match mesh.indices() {
+        Some(Indices::U32(idx)) => idx.clone(),
+        Some(Indices::U16(idx)) => idx.iter().map(|&i| i as u32).collect(),
+        None => return None,
+    };
+
+    if indices.is_empty() || positions.is_empty() {
+        return None;
+    }
+
+    // Convert to Vertex structs for meshopt
+    let vertex_data: Vec<Vertex> = positions
+        .iter()
+        .map(|p| Vertex { position: *p })
+        .collect();
+
+    // Create byte slice for meshopt's VertexDataAdapter using typed_to_bytes
+    let vertex_bytes = typed_to_bytes(&vertex_data);
+
+    let adapter = match VertexDataAdapter::new(
+        vertex_bytes,
+        std::mem::size_of::<Vertex>(),
+        0, // position offset in Vertex struct
+    ) {
+        Ok(a) => a,
+        Err(_) => return None,
+    };
+
+    // Calculate target index count (must be multiple of 3 for triangles)
+    let target_indices = ((indices.len() as f32) * target_ratio) as usize;
+    let target_indices = (target_indices / 3) * 3; // Round down to triangle boundary
+    let target_indices = target_indices.max(3); // At least one triangle
+
+    // Simplify the mesh using sloppy simplification
+    // This sacrifices some mesh appearance for better performance
+    // and doesn't require SimplifyOptions which isn't exported in v0.6.2
+    let simplified_indices = simplify_sloppy(
+        &indices,
+        &adapter,
+        target_indices,
+        0.01, // target error (1% of mesh extent)
+        None,
+    );
+
+    if simplified_indices.is_empty() {
+        return None;
+    }
+
+    // Build simplified mesh (reuse original vertices, only indices change)
+    let mut simplified = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::all(),
+    );
+    simplified.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions.clone());
+    simplified.insert_indices(Indices::U32(simplified_indices));
+    simplified.compute_flat_normals();
+
+    Some(simplified)
+}
+
+/// Combined operation: merge ship meshes and simplify
+///
+/// This is a convenience function that combines multiple meshes into one
+/// and then simplifies the result. Useful for creating LOD versions of
+/// complex multi-part ships.
+pub fn combine_and_simplify_meshes(
+    mesh_transform_pairs: &[(&Mesh, &GlobalTransform)],
+    target_ratio: f32,
+) -> Option<Mesh> {
+    let combined = combine_meshes(mesh_transform_pairs)?;
+    simplify_mesh(&combined, target_ratio)
+}
+
+/// Remove unused vertices from a mesh after simplification
+///
+/// The simplify function only reduces indices - unused vertices remain.
+/// This function creates a new mesh with only the vertices that are
+/// actually referenced by the indices.
+pub fn compact_mesh(mesh: &Mesh) -> Option<Mesh> {
+    let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(VertexAttributeValues::Float32x3(p)) => p,
+        _ => return None,
+    };
+
+    let indices: Vec<u32> = match mesh.indices() {
+        Some(Indices::U32(idx)) => idx.clone(),
+        Some(Indices::U16(idx)) => idx.iter().map(|&i| i as u32).collect(),
+        None => return None,
+    };
+
+    // Find which vertices are actually used
+    let mut used_vertices = vec![false; positions.len()];
+    for &idx in &indices {
+        if (idx as usize) < used_vertices.len() {
+            used_vertices[idx as usize] = true;
+        }
+    }
+
+    // Create mapping from old indices to new indices
+    let mut old_to_new: Vec<u32> = vec![0; positions.len()];
+    let mut new_positions: Vec<[f32; 3]> = Vec::new();
+
+    for (old_idx, &is_used) in used_vertices.iter().enumerate() {
+        if is_used {
+            old_to_new[old_idx] = new_positions.len() as u32;
+            new_positions.push(positions[old_idx]);
+        }
+    }
+
+    // Remap indices
+    let new_indices: Vec<u32> = indices
+        .iter()
+        .map(|&idx| old_to_new[idx as usize])
+        .collect();
+
+    // Build compacted mesh
+    let mut compacted = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::all(),
+    );
+    compacted.insert_attribute(Mesh::ATTRIBUTE_POSITION, new_positions);
+    compacted.insert_indices(Indices::U32(new_indices));
+    compacted.compute_flat_normals();
+
+    Some(compacted)
+}

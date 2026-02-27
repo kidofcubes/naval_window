@@ -2,6 +2,7 @@ mod cam_movement;
 mod water;
 mod voxelize;
 mod watering;
+mod mesh_optimize;
 
 use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, window::WindowResolution};
 use std::{env, path::{Path, PathBuf}};
@@ -97,6 +98,13 @@ fn temp_test_update(
     }
 
     if(key.pressed(KeyCode::KeyB)){
+        if let Some(voxel_grid) = &build_data.voxel_grid {
+            render_voxel_grid(&voxel_grid, &mut gizmos);
+            info!("kjasjfklajdfjd {}",voxel_grid.voxels.len());
+        }
+    }
+
+    if(key.pressed(KeyCode::KeyJ)){
         if let Some(voxel_grid) = &build_data.voxel_grid {
             render_voxel_grid(&voxel_grid, &mut gizmos);
             info!("kjasjfklajdfjd {}",voxel_grid.voxels.len());
