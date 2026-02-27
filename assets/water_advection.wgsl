@@ -63,6 +63,13 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let theta = index_to_radians(theta_index);
 
     for (var wave_index: u32 = 0u; wave_index < TOTAL_WAVE_NUMBERS; wave_index++) {
+        let layer = layer_index(theta_index, wave_index);
+
+//        let current = sample_amplitude(f32(x), f32(z), theta_index, wave_index);
+//        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(current.x*0.9, current.y * 0.9, 0.0, 1.0));
+////        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(0.0, 0.0, 0.0, 1.0));
+//        continue;
+
         // Wave number = 1.0 for now (matching CPU WAVE_NUMBERS[0])
         let wave_number = 1.0;
 
@@ -73,6 +80,9 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // Displacement based on group velocity
         let dx = cos(theta) * group_speed * settings.delta_time * TIME_MULT;
         let dz = sin(theta) * group_speed * settings.delta_time * TIME_MULT;
+
+//        let dx = cos(theta) * group_speed * 0.1 * TIME_MULT;
+//        let dz = sin(theta) * group_speed * 0.1 * TIME_MULT;
 
         // Previous position (semi-Lagrangian)
         let prev_x = f32(x) - dx;
@@ -98,7 +108,9 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let new_amplitude = normalized * new_magnitude;
 
         // Write to output
-        let layer = layer_index(theta_index, wave_index);
+//        let layer = layer_index(theta_index, wave_index);
         textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 1.0));
+//        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(prev, 0.0, 1.0));
+//        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(0.0, 0.0, 0.0, 1.0));
     }
 }

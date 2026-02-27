@@ -37,9 +37,22 @@ impl Plugin for Watering{
                 delta_time: 0.0,
                 elapsed_time: 0.0,
             })
+            .insert_resource(WaterDebugSettings {
+                spawn_center_x: GRID_X_SIZE as f32 / 2.0,
+                spawn_center_z: GRID_Z_SIZE as f32 / 2.0,
+                radius: 5.0,
+                scale: 5.0,
+                inject: 0.0,
+                _padding0: 0.0,
+                _padding1: 0.0,
+                _padding2: 0.0,
+            })
             .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
             .add_plugins(ExtractResourcePlugin::<HeightFieldHandle>::default())
+            .add_plugins(ExtractResourcePlugin::<WaterDebugSettings>::default())
             .add_systems(Startup, (temp_setup))
+            .add_systems(Update, debug_input_system)
+            .add_systems(Update, (tick_water_time))
         // Advance simulation time each frame
         // .add_systems(Update, (tick_water_time, sync_ship_position))
         ;
@@ -47,7 +60,6 @@ impl Plugin for Watering{
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             // .init_resource::<WaterSettings>()
-            .add_systems(Update, (tick_water_time))
             .add_systems(
                 Render,
                 (
@@ -116,7 +128,51 @@ pub fn temp_setup(
 
 fn tick_water_time(time: Res<Time>, mut settings: ResMut<WaterSettings>) {
     settings.elapsed_time = time.elapsed_secs();
-    settings.delta_time = time.delta_secs().clamp(0.0, 1.0 / 30.0);
+    settings.delta_time = time.delta_secs();
+}
+
+fn debug_input_system(
+    mut debug_settings: ResMut<WaterDebugSettings>,
+    key: Res<ButtonInput<KeyCode>>,
+) {
+    // H key injects amplitude this frame
+    debug_settings.inject = if key.pressed(KeyCode::KeyH) { 1.0 } else { 0.0 };
+
+    // Arrow keys adjust scale and radius
+    if key.pressed(KeyCode::ArrowUp) {
+        debug_settings.scale += 0.5;
+        println!("scale {}", debug_settings.scale);
+    }
+    if key.pressed(KeyCode::ArrowDown) {
+        debug_settings.scale -= 0.5;
+        println!("scale {}", debug_settings.scale);
+    }
+    if key.pressed(KeyCode::ArrowRight) {
+        debug_settings.radius += 0.5;
+        println!("radius {}", debug_settings.radius);
+    }
+    if key.pressed(KeyCode::ArrowLeft) {
+        debug_settings.radius -= 0.5;
+        println!("radius {}", debug_settings.radius);
+    }
+
+    // WASD moves spawn center
+    if key.pressed(KeyCode::KeyA) {
+        debug_settings.spawn_center_x -= 1.0;
+        println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
+    }
+    if key.pressed(KeyCode::KeyD) {
+        debug_settings.spawn_center_x += 1.0;
+        println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
+    }
+    if key.pressed(KeyCode::KeyS) {
+        debug_settings.spawn_center_z -= 1.0;
+        println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
+    }
+    if key.pressed(KeyCode::KeyW) {
+        debug_settings.spawn_center_z += 1.0;
+        println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
+    }
 }
 
 
@@ -451,4 +507,21 @@ pub struct WaterSettings {
 #[derive(Resource, ExtractResource, Clone)]
 pub struct HeightFieldHandle {
     pub handle: Handle<Image>
+}
+
+/// Debug settings for amplitude injection (extracted to render world)
+#[derive(Resource, ExtractResource, Clone, ShaderType)]
+pub struct WaterDebugSettings {
+    pub spawn_center_x: f32,
+    pub spawn_center_z: f32,
+    /// Radius of injection circle in grid units
+    pub radius: f32,
+    /// Amplitude scale
+    pub scale: f32,
+    /// Whether injection is active this frame (1.0 = active, 0.0 = inactive)
+    pub inject: f32,
+    /// Padding for alignment
+    pub _padding0: f32,
+    pub _padding1: f32,
+    pub _padding2: f32
 }

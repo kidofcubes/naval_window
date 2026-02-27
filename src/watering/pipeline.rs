@@ -7,7 +7,7 @@ use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, te
 use bevy::render::render_resource::Sampler;
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
-use crate::watering::{HeightFieldHandle, WaterSettings, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_WAVE_NUMBERS};
+use crate::watering::{HeightFieldHandle, WaterDebugSettings, WaterSettings, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_WAVE_NUMBERS};
 
 // ─── GPU Resources ────────────────────────────────────────────────────────────
 
@@ -67,7 +67,8 @@ impl render_graph::Node for WaterSimulationNode {
         let Some(bgs)      = world.get_resource::<WaterBindGroups>() else { return Ok(()) };
 
         // Fetch compiled pipelines — skip if any aren't ready yet.
-        let (Some(adv_pl), Some(prof_pl), Some(hgt_pl)) = (
+        let (Some(inj_pl), Some(adv_pl), Some(prof_pl), Some(hgt_pl)) = (
+            pipeline_cache.get_compute_pipeline(pipelines.inject_id),
             pipeline_cache.get_compute_pipeline(pipelines.advection_id),
             pipeline_cache.get_compute_pipeline(pipelines.profile_id),
             pipeline_cache.get_compute_pipeline(pipelines.height_id),
@@ -83,6 +84,18 @@ impl render_graph::Node for WaterSimulationNode {
 
         let encoder = ctx.command_encoder();
 
+        // ── Pass 0 : Debug Injection ───────────────────────────────────────
+        // Inject amplitude at debug location (runs every frame, but shader
+        // checks the inject flag and early-outs if not active).
+        {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label:            Some("water_inject"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(inj_pl);
+            pass.set_bind_group(0, &bgs.inject, &[]);
+            pass.dispatch_workgroups(wg_grid.0, wg_grid.1, wg_grid.2);
+        }
 
         // ── Pass 1 : Advection ─────────────────────────────────────────────
         // Semi-Lagrangian advection of A(x, y, θ_d).
@@ -226,15 +239,18 @@ pub fn prepare_gpu_resources(
 
 // ─── Pipeline Resource ────────────────────────────────────────────────────────
 
-/// Holds all three compute pipelines and their shared bind group layouts.
+/// Holds all compute pipelines and their shared bind group layouts.
 #[derive(Resource)]
 pub struct WaterPipelines {
     // ── Layouts ────────────────────────────────────────────────────────────
+    pub inject_layout:    BindGroupLayoutDescriptor,
     pub advection_layout: BindGroupLayoutDescriptor,
     pub profile_layout:   BindGroupLayoutDescriptor,
     pub height_layout:    BindGroupLayoutDescriptor,
 
     // ── Cached pipeline IDs ────────────────────────────────────────────────
+    /// Pass 0 – debug amplitude injection (optional, runs when inject flag is set).
+    pub inject_id:    CachedComputePipelineId,
     /// Pass 1 – semi-Lagrangian advection of A(x, y, θ).
     pub advection_id: CachedComputePipelineId,
     /// Pass 2 – build the 1-D profile buffer Ψ(p) from the Phillips spectrum.
@@ -248,6 +264,25 @@ impl FromWorld for WaterPipelines {
         let device        = world.resource::<RenderDevice>();
         let asset_server  = world.resource::<AssetServer>();
         let pipeline_cache = world.resource::<PipelineCache>();
+
+        // ── Inject layout ─────────────────────────────────────────────────
+        // Binding 0 : amplitude_out (Texture2DArray, ReadWrite storage)
+        // Binding 1 : settings      (Uniform buffer)
+        // Binding 2 : debug_settings (Uniform buffer)
+        let inject_layout = BindGroupLayoutDescriptor::new(
+            "inject_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (
+                    texture_storage_2d_array(
+                        TextureFormat::Rg32Float,
+                        StorageTextureAccess::ReadWrite,
+                    ),
+                    uniform_buffer::<WaterSettings>(false),
+                    uniform_buffer::<WaterDebugSettings>(false),
+                ),
+            ),
+        );
 
         // ── Advection layout ───────────────────────────────────────────────
         // Binding 0 : amplitude_in  (Texture2DArray, sampled)
@@ -315,11 +350,22 @@ impl FromWorld for WaterPipelines {
         );
 
         // ── Load shaders ───────────────────────────────────────────────────
+        let inject_shader  = asset_server.load("water_inject.wgsl");
         let adv_shader     = asset_server.load("water_advection.wgsl");
         let profile_shader = asset_server.load("water_profile.wgsl");
         let height_shader  = asset_server.load("water_height.wgsl");
 
         // ── Queue pipelines ────────────────────────────────────────────────
+        let inject_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label:                        Some("water_inject".into()),
+            layout:                       vec![inject_layout.clone()],
+            push_constant_ranges:         vec![],
+            shader:                       inject_shader,
+            shader_defs:                  vec![],
+            entry_point:                  Some("inject_amplitude".into()),
+            zero_initialize_workgroup_memory: false,
+        });
+
         let advection_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label:                        Some("water_advection".into()),
             layout:                       vec![advection_layout.clone()],
@@ -351,9 +397,11 @@ impl FromWorld for WaterPipelines {
         });
 
         Self {
+            inject_layout,
             advection_layout,
             profile_layout,
             height_layout,
+            inject_id,
             advection_id,
             profile_id,
             height_id,
@@ -365,11 +413,14 @@ impl FromWorld for WaterPipelines {
 
 #[derive(Resource)]
 pub struct WaterBindGroups {
+    pub inject:    BindGroup,
     pub advection: BindGroup,
     pub profile:   BindGroup,
     pub height:    BindGroup,
     /// Settings uniform buffer (updated via write_buffer each frame).
     pub settings_buf: Buffer,
+    /// Debug settings uniform buffer.
+    pub debug_settings_buf: Buffer,
 }
 
 pub fn queue_bind_groups(
@@ -378,6 +429,7 @@ pub fn queue_bind_groups(
     pipelines:     Res<WaterPipelines>,
     gpu:           Option<ResMut<WaterGpuResources>>,
     settings:      Res<WaterSettings>,
+    debug_settings: Res<WaterDebugSettings>,
     existing_bgs:  Option<ResMut<WaterBindGroups>>,
     hf_handle:     Option<ResMut<HeightFieldHandle>>,
     render_images: Res<RenderAssets<GpuImage>>,
@@ -394,30 +446,54 @@ pub fn queue_bind_groups(
     // Use it as the compute shader's write target.
     let height_write_view = &gpu_image.texture_view;
 
-    // ── Create or update the settings uniform buffer ───────────────────────
-    let settings_buf = if let Some(mut bgs) = existing_bgs {
-        // Write updated settings into the existing buffer.
+    // ── Create or update the uniform buffers ────────────────────────────────
+    let (settings_buf, debug_settings_buf) = if let Some(mut bgs) = existing_bgs {
+        // Write updated settings into the existing buffers.
         let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
         buf.write(&*settings).expect("ShaderType write failed");
         queue.write_buffer(&bgs.settings_buf, 0, buf.into_inner().as_slice());
 
+        let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
+        buf.write(&*debug_settings).expect("ShaderType write failed");
+        queue.write_buffer(&bgs.debug_settings_buf, 0, buf.into_inner().as_slice());
+
         // Flip ping-pong *after* updating, then rebuild bind groups
         // (they reference the new read/write views).
         gpu.flip = !gpu.flip;
-        bgs.settings_buf.clone() // borrow workaround – see below
+        (bgs.settings_buf.clone(), bgs.debug_settings_buf.clone())
     } else {
-        // First frame – create buffer from scratch.
+        // First frame – create buffers from scratch.
         let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
         buf.write(&*settings).expect("ShaderType write failed");
-        let bytes = buf.into_inner();
-        device.create_buffer_with_data(&BufferInitDescriptor {
+        let settings_buf = device.create_buffer_with_data(&BufferInitDescriptor {
             label:    Some("water_settings_buf"),
-            contents: &bytes,
+            contents: &buf.into_inner(),
             usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        })
+        });
+
+        let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
+        buf.write(&*debug_settings).expect("ShaderType write failed");
+        let debug_settings_buf = device.create_buffer_with_data(&BufferInitDescriptor {
+            label:    Some("water_debug_settings_buf"),
+            contents: &buf.into_inner(),
+            usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+
+        (settings_buf, debug_settings_buf)
     };
 
     let (amp_read, amp_write) = gpu.amp_views();
+
+    // Inject writes to the *write* texture (before advection reads from it next frame)
+    let inject = device.create_bind_group(
+        "inject_bg",
+        &pipeline_cache.get_bind_group_layout(&pipelines.inject_layout),
+        &BindGroupEntries::sequential((
+            amp_read,
+            settings_buf.as_entire_binding(),
+            debug_settings_buf.as_entire_binding(),
+        )),
+    );
 
     let advection = device.create_bind_group(
         "advection_bg",
@@ -453,9 +529,11 @@ pub fn queue_bind_groups(
     );
 
     commands.insert_resource(WaterBindGroups {
+        inject,
         advection,
         profile,
         height,
         settings_buf,
+        debug_settings_buf,
     });
 }

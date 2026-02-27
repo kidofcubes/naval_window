@@ -56,6 +56,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         0.0
     );
 //    offset.y += textureSampleLevel(wake_texture, wake_sampler, vertex.uv.xy, 0.0).r * 10.0;
+    offset.y += textureSampleLevel(height_field, height_field_sampler, vertex.uv.xy, 0.0).r * 1.0;
 //    offset.y += textureLoad(wake_texture, vec2<i32>(vertex.uv.xy*256), 0).r * 10;
     let world_position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);
 
