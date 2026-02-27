@@ -2,21 +2,10 @@
 // Computes eta(x, y) = sum over all directions of A(x,y,d) * profile lookup
 // Dispatched with workgroups (ceil(RENDER_X/8), ceil(RENDER_Z/8), 1)
 
-const GRID_X_SIZE: u32 = 128u;
-const GRID_Z_SIZE: u32 = 128u;
-const RENDER_X_SIZE: u32 = 256u;
-const RENDER_Z_SIZE: u32 = 256u;
-const DIRECTIONS: u32 = 64u;
-const TOTAL_WAVE_NUMBERS: u32 = 1u;
-const PROFILE_BUFFER_LENGTH: u32 = 2048u;
-const GRAVITY: f32 = 9.81;
-const TAU: f32 = 6.283185307179586;
-
-struct WaterSettings {
-    height_scale: f32,
-    time_scale: f32,
-    delta_time: f32,
-    elapsed_time: f32,
+#import "water_common.wgsl"::{
+    GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
+    DIRECTIONS, TOTAL_WAVE_NUMBERS, PROFILE_BUFFER_LENGTH,
+    TAU, WaterSettings, index_to_radians, layer_index
 }
 
 @group(0) @binding(0) var amplitude_in: texture_2d_array<f32>;
@@ -24,14 +13,6 @@ struct WaterSettings {
 @group(0) @binding(2) var profile_in: texture_storage_2d<r32float, read>;
 @group(0) @binding(3) var height_out: texture_storage_2d<r32float, write>;
 @group(0) @binding(4) var<uniform> settings: WaterSettings;
-
-fn index_to_radians(i: u32) -> f32 {
-    return f32(i) * (TAU / f32(DIRECTIONS));
-}
-
-fn layer_index(theta_index: u32, wave_index: u32) -> i32 {
-    return i32(wave_index * DIRECTIONS + theta_index);
-}
 
 // Hardware bilinear sample from amplitude texture array
 fn sample_amplitude(x: f32, z: f32, theta_index: u32, wave_index: u32) -> vec2<f32> {

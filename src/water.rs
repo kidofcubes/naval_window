@@ -26,7 +26,7 @@ impl Plugin for WaterPlugin {
         });
 
         app.add_plugins(Watering);
-        app.add_systems(Startup, setup.after(watering::temp_setup));
+        app.add_systems(Startup, setup.after(watering::setup_height_field));
         app.add_systems(Update, update);
     }
 }

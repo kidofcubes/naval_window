@@ -2,33 +2,15 @@
 // Dispatched with workgroups (ceil(GRID_X/8), ceil(GRID_Z/8), DIRECTIONS)
 // Each invocation handles one (x, z) cell for one direction
 
-const GRID_X_SIZE: u32 = 128u;
-const GRID_Z_SIZE: u32 = 128u;
-const DIRECTIONS: u32 = 64u;
-const TOTAL_WAVE_NUMBERS: u32 = 1u;
-const GRAVITY: f32 = 9.81;
-const TIME_MULT: f32 = 3.0;
-const TAU: f32 = 6.283185307179586;
-
-struct WaterSettings {
-    height_scale: f32,
-    time_scale: f32,
-    delta_time: f32,
-    elapsed_time: f32,
+#import "water_common.wgsl"::{
+    GRID_X_SIZE, GRID_Z_SIZE, DIRECTIONS, TOTAL_WAVE_NUMBERS,
+    GRAVITY, TIME_MULT, TAU, WaterSettings, index_to_radians, layer_index
 }
 
 @group(0) @binding(0) var amplitude_in: texture_2d_array<f32>;
 @group(0) @binding(1) var amplitude_sampler: sampler;
 @group(0) @binding(2) var amplitude_out: texture_storage_2d_array<rg32float, write>;
 @group(0) @binding(3) var<uniform> settings: WaterSettings;
-
-fn index_to_radians(i: u32) -> f32 {
-    return f32(i) * (TAU / f32(DIRECTIONS));
-}
-
-fn layer_index(theta_index: u32, wave_index: u32) -> i32 {
-    return i32(wave_index * DIRECTIONS + theta_index);
-}
 
 // Hardware bilinear sampling using sampler
 fn sample_amplitude(x: f32, z: f32, theta_index: u32, wave_index: u32) -> vec2<f32> {
@@ -65,11 +47,6 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var wave_index: u32 = 0u; wave_index < TOTAL_WAVE_NUMBERS; wave_index++) {
         let layer = layer_index(theta_index, wave_index);
 
-//        let current = sample_amplitude(f32(x), f32(z), theta_index, wave_index);
-//        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(current.x*0.9, current.y * 0.9, 0.0, 1.0));
-////        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(0.0, 0.0, 0.0, 1.0));
-//        continue;
-
         // Wave number = 1.0 for now (matching CPU WAVE_NUMBERS[0])
         let wave_number = 1.0;
 
@@ -80,9 +57,6 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // Displacement based on group velocity
         let dx = cos(theta) * group_speed * settings.delta_time * TIME_MULT;
         let dz = sin(theta) * group_speed * settings.delta_time * TIME_MULT;
-
-//        let dx = cos(theta) * group_speed * 0.1 * TIME_MULT;
-//        let dz = sin(theta) * group_speed * 0.1 * TIME_MULT;
 
         // Previous position (semi-Lagrangian)
         let prev_x = f32(x) - dx;
@@ -108,9 +82,6 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let new_amplitude = normalized * new_magnitude;
 
         // Write to output
-//        let layer = layer_index(theta_index, wave_index);
         textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 1.0));
-//        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(prev, 0.0, 1.0));
-//        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(0.0, 0.0, 0.0, 1.0));
     }
 }

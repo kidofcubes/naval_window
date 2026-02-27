@@ -2,17 +2,9 @@
 // Precomputes cos(offset - phase) for height reconstruction
 // Dispatched with workgroups (ceil(PROFILE_BUFFER_LENGTH/64), 1, 1)
 
-const PROFILE_BUFFER_LENGTH: u32 = 2048u;
-const TOTAL_WAVE_NUMBERS: u32 = 1u;
-const GRAVITY: f32 = 9.81;
-const TIME_MULT: f32 = 3.0;
-const TAU: f32 = 6.283185307179586;
-
-struct WaterSettings {
-    height_scale: f32,
-    time_scale: f32,
-    delta_time: f32,
-    elapsed_time: f32,
+#import "water_common.wgsl"::{
+    PROFILE_BUFFER_LENGTH, TOTAL_WAVE_NUMBERS,
+    GRAVITY, TIME_MULT, TAU, WaterSettings
 }
 
 @group(0) @binding(0) var profile_out: texture_storage_2d<r32float, write>;
