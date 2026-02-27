@@ -1,7 +1,25 @@
 use bevy::prelude::*;
-use bevy::render::render_resource::{AddressMode, Extent3d, FilterMode, SamplerDescriptor, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
-use bevy::render::renderer::RenderDevice;
+use bevy::render::extract_resource::ExtractResource;
+use bevy::render::render_asset::RenderAssets;
+use bevy::render::render_graph;
+use bevy::render::render_graph::{NodeRunError, RenderGraphContext, RenderLabel};
+use bevy::render::render_resource::{encase, AddressMode, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, Extent3d, FilterMode, PipelineCache, SamplerDescriptor, ShaderStages, ShaderType, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
+use bevy::render::render_resource::binding_types::{texture_storage_2d, texture_storage_2d_array, uniform_buffer};
+use bevy::render::renderer::{RenderContext, RenderDevice};
+use bevy::render::texture::GpuImage;
 use crate::watering::{DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_WAVE_NUMBERS};
+
+#[derive(Resource, ExtractResource, Clone, ShaderType)]
+struct WaterSettings {
+    pub height_scale: f32,
+    pub time_scale: f32,
+}
+
+#[derive(Resource, ExtractResource, Clone)]
+struct HeightFieldHandle {
+    pub handle: Handle<Image>
+}
+
 // ─── GPU Resources ────────────────────────────────────────────────────────────
 
 /// All GPU textures owned by the water simulation.
@@ -36,6 +54,87 @@ impl WaterGpuResources {
         }
     }
 }
+
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
+pub struct WaterNodeLabel;
+
+#[derive(Default)]
+pub struct WaterSimulationNode;
+
+impl render_graph::Node for WaterSimulationNode {
+    fn run(
+        &self,
+        _graph:  &mut RenderGraphContext,
+        ctx:     &mut RenderContext,
+        world:   &World,
+    ) -> Result<(), NodeRunError> {
+        let pipeline_cache = world.resource::<PipelineCache>();
+        let pipelines      = world.resource::<WaterPipelines>();
+        let Some(bgs)      = world.get_resource::<WaterBindGroups>() else { return Ok(()) };
+
+        // Fetch compiled pipelines — skip if any aren't ready yet.
+        let (Some(adv_pl), Some(prof_pl), Some(hgt_pl)) = (
+            pipeline_cache.get_compute_pipeline(pipelines.advection_id),
+            pipeline_cache.get_compute_pipeline(pipelines.profile_id),
+            pipeline_cache.get_compute_pipeline(pipelines.height_id),
+        ) else {
+            return Ok(());
+        };
+
+        // ── Workgroup counts ───────────────────────────────────────────────
+        // Each shader uses @workgroup_size(8, 8, 1) over the grid / profile.
+        let wg_grid    = (GRID_X_SIZE.div_ceil(8) as u32, GRID_Z_SIZE.div_ceil(8) as u32, DIRECTIONS as u32);
+        let wg_profile = (PROFILE_BUFFER_LENGTH.div_ceil(64) as u32, 1, 1);
+        let wg_height  = (RENDER_X_SIZE.div_ceil(8) as u32, RENDER_Z_SIZE.div_ceil(8) as u32, 1);
+
+        let encoder = ctx.command_encoder();
+
+
+        // ── Pass 1 : Advection ─────────────────────────────────────────────
+        // Semi-Lagrangian advection of A(x, y, θ_d).
+        // Dispatched once per direction in the Z dimension of the workgroup.
+        {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label:            Some("water_advection"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(adv_pl);
+            pass.set_bind_group(0, &bgs.advection, &[]);
+            pass.dispatch_workgroups(wg_grid.0, wg_grid.1, wg_grid.2);
+        }
+
+        // ── Pass 2 : Profile buffer ────────────────────────────────────────
+        // Build Ψ(p) from the Phillips spectrum.
+        // Done after advection so height reconstruction uses an up-to-date profile.
+        {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label:            Some("water_profile"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(prof_pl);
+            pass.set_bind_group(0, &bgs.profile, &[]);
+            pass.dispatch_workgroups(wg_profile.0, wg_profile.1, wg_profile.2);
+        }
+
+        // ── Pass 3 : Height reconstruction ─────────────────────────────────
+        // η(x, y) = Σ_d  A(x, y, d) · Ψ(k̂_d · x_world + φ_d)
+        {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label:            Some("water_height"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(hgt_pl);
+            pass.set_bind_group(0, &bgs.height, &[]);
+            pass.dispatch_workgroups(wg_height.0, wg_height.1, wg_height.2);
+        }
+
+        Ok(())
+    }
+}
+
+
+
 
 pub fn prepare_gpu_resources(
     mut commands: Commands,
@@ -76,7 +175,7 @@ pub fn prepare_gpu_resources(
     // ── Profile buffer ─────────────────────────────────────────────────────
     let profile_buf = render_device.create_texture(&TextureDescriptor {
         label:               Some("profile_buf"),
-        size:                Extent3d { width: PROFILE_BUFFER_LENGTH as u32, height: 1, depth_or_array_layers: 1 },
+        size:                Extent3d { width: PROFILE_BUFFER_LENGTH as u32, height: TOTAL_WAVE_NUMBERS as u32, depth_or_array_layers: 1 },
         mip_level_count:     1,
         sample_count:        1,
         dimension:           TextureDimension::D2,
@@ -121,5 +220,243 @@ pub fn prepare_gpu_resources(
         // height_field,
         // height_field_view,
         // height_field_sampler,
+    });
+}
+
+// ─── Pipeline Resource ────────────────────────────────────────────────────────
+
+/// Holds all three compute pipelines and their shared bind group layouts.
+#[derive(Resource)]
+pub struct WaterPipelines {
+    // ── Layouts ────────────────────────────────────────────────────────────
+    pub advection_layout: BindGroupLayoutDescriptor,
+    pub profile_layout:   BindGroupLayoutDescriptor,
+    pub height_layout:    BindGroupLayoutDescriptor,
+
+    // ── Cached pipeline IDs ────────────────────────────────────────────────
+    /// Pass 1 – semi-Lagrangian advection of A(x, y, θ).
+    pub advection_id: CachedComputePipelineId,
+    /// Pass 2 – build the 1-D profile buffer Ψ(p) from the Phillips spectrum.
+    pub profile_id:   CachedComputePipelineId,
+    /// Pass 3 – reconstruct the visible height field η(x, y).
+    pub height_id:    CachedComputePipelineId,
+}
+
+impl FromWorld for WaterPipelines {
+    fn from_world(world: &mut World) -> Self {
+        let device        = world.resource::<RenderDevice>();
+        let asset_server  = world.resource::<AssetServer>();
+        let pipeline_cache = world.resource::<PipelineCache>();
+
+        // ── Advection layout ───────────────────────────────────────────────
+        // Binding 0 : amplitude_in  (Texture2DArray, ReadOnly storage)
+        // Binding 1 : amplitude_out (Texture2DArray, WriteOnly storage)
+        // Binding 2 : settings      (Uniform buffer)
+        // let advection_layout = device.create_bind_group_layout(
+        let advection_layout = BindGroupLayoutDescriptor::new(
+            "advection_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (
+                    texture_storage_2d_array(
+                        TextureFormat::R32Float,
+                        StorageTextureAccess::ReadOnly,
+                    ),
+                    texture_storage_2d_array(
+                        TextureFormat::R32Float,
+                        StorageTextureAccess::WriteOnly,
+                    ),
+                    uniform_buffer::<WaterSettings>(false),
+                ),
+            ),
+        );
+
+        // ── Profile layout ─────────────────────────────────────────────────
+        // Binding 0 : profile_out (Texture2D 1×N, WriteOnly)
+        // Binding 1 : settings    (Uniform)
+        // let profile_layout = device.create_bind_group_layout(
+        let profile_layout = BindGroupLayoutDescriptor::new(
+            "profile_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (
+                    texture_storage_2d(
+                        TextureFormat::R32Float,
+                        StorageTextureAccess::WriteOnly,
+                    ),
+                    uniform_buffer::<WaterSettings>(false),
+                ),
+            ),
+        );
+
+        // ── Height layout ──────────────────────────────────────────────────
+        // Binding 0 : amplitude (Texture2DArray, ReadOnly)
+        // Binding 1 : profile   (Texture2D, ReadOnly)
+        // Binding 2 : height out (Texture2D, WriteOnly)
+        // Binding 3 : settings  (Uniform)
+        // let height_layout = device.create_bind_group_layout(
+        let height_layout = BindGroupLayoutDescriptor::new(
+            "height_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (
+                    texture_storage_2d_array(
+                        TextureFormat::R32Float,
+                        StorageTextureAccess::ReadOnly,
+                    ),
+                    texture_storage_2d(
+                        TextureFormat::R32Float,
+                        StorageTextureAccess::ReadOnly,
+                    ),
+                    texture_storage_2d(
+                        TextureFormat::R32Float,
+                        StorageTextureAccess::WriteOnly,
+                    ),
+                    uniform_buffer::<WaterSettings>(false),
+                ),
+            ),
+        );
+
+        // ── Load shaders ───────────────────────────────────────────────────
+        let adv_shader     = asset_server.load("water_advection.wgsl");
+        let profile_shader = asset_server.load("water_profile.wgsl");
+        let height_shader  = asset_server.load("water_height.wgsl");
+
+        // ── Queue pipelines ────────────────────────────────────────────────
+        let advection_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label:                        Some("water_advection".into()),
+            layout:                       vec![advection_layout.clone()],
+            push_constant_ranges:         vec![],
+            shader:                       adv_shader,
+            shader_defs:                  vec![],
+            entry_point:                  Some("advect".into()),
+            zero_initialize_workgroup_memory: false,
+        });
+
+        let profile_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label:                        Some("water_profile".into()),
+            layout:                       vec![profile_layout.clone()],
+            push_constant_ranges:         vec![],
+            shader:                       profile_shader,
+            shader_defs:                  vec![],
+            entry_point:                  Some("build_profile".into()),
+            zero_initialize_workgroup_memory: false,
+        });
+
+        let height_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label:                        Some("water_height".into()),
+            layout:                       vec![height_layout.clone()],
+            push_constant_ranges:         vec![],
+            shader:                       height_shader,
+            shader_defs:                  vec![],
+            entry_point:                  Some("reconstruct_height".into()),
+            zero_initialize_workgroup_memory: false,
+        });
+
+        Self {
+            advection_layout,
+            profile_layout,
+            height_layout,
+            advection_id,
+            profile_id,
+            height_id,
+        }
+    }
+}
+
+// ─── Bind Groups (rebuilt each frame because ping-pong flips) ─────────────────
+
+#[derive(Resource)]
+pub struct WaterBindGroups {
+    pub advection: BindGroup,
+    pub profile:   BindGroup,
+    pub height:    BindGroup,
+    /// Settings uniform buffer (updated via write_buffer each frame).
+    pub settings_buf: Buffer,
+}
+
+pub fn queue_bind_groups(
+    mut commands:  Commands,
+    device:        Res<RenderDevice>,
+    pipelines:     Res<WaterPipelines>,
+    gpu:           Option<ResMut<WaterGpuResources>>,
+    settings:      Res<WaterSettings>,
+    existing_bgs:  Option<ResMut<WaterBindGroups>>,
+    hf_handle:     Option<ResMut<HeightFieldHandle>>,
+    render_images: Res<RenderAssets<GpuImage>>,
+    queue:         Res<bevy::render::renderer::RenderQueue>,
+    pipeline_cache: Res<PipelineCache>,
+) {
+    let Some(mut gpu) = gpu else { return };
+
+    let Some(hf_handle) = hf_handle else { return };
+    // Get the GpuImage Bevy uploaded from your Image asset
+    let Some(gpu_image) = render_images.get(&hf_handle.handle) else { return };
+
+    // This texture_view is the exact same texture the material will sample.
+    // Use it as the compute shader's write target.
+    let height_write_view = &gpu_image.texture_view;
+
+    // ── Create or update the settings uniform buffer ───────────────────────
+    let settings_buf = if let Some(mut bgs) = existing_bgs {
+        // Write updated settings into the existing buffer.
+        let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
+        buf.write(&*settings).expect("ShaderType write failed");
+        queue.write_buffer(&bgs.settings_buf, 0, buf.into_inner().as_slice());
+
+        // Flip ping-pong *after* updating, then rebuild bind groups
+        // (they reference the new read/write views).
+        gpu.flip = !gpu.flip;
+        bgs.settings_buf.clone() // borrow workaround – see below
+    } else {
+        // First frame – create buffer from scratch.
+        let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
+        buf.write(&*settings).expect("ShaderType write failed");
+        let bytes = buf.into_inner();
+        device.create_buffer_with_data(&BufferInitDescriptor {
+            label:    Some("water_settings_buf"),
+            contents: &bytes,
+            usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        })
+    };
+
+    let (amp_read, amp_write) = gpu.amp_views();
+
+    let advection = device.create_bind_group(
+        "advection_bg",
+        &pipeline_cache.get_bind_group_layout(&pipelines.advection_layout),
+        &BindGroupEntries::sequential((
+            amp_read,
+            amp_write,
+            settings_buf.as_entire_binding(),
+        )),
+    );
+
+    let profile = device.create_bind_group(
+        "profile_bg",
+        &pipeline_cache.get_bind_group_layout(&pipelines.profile_layout),
+        &BindGroupEntries::sequential((
+            &gpu.profile_buf_view,
+            settings_buf.as_entire_binding(),
+        )),
+    );
+
+    // Height reconstruction reads the *newly written* amplitude (amp_write).
+    let height = device.create_bind_group(
+        "height_bg",
+        &pipeline_cache.get_bind_group_layout(&pipelines.height_layout),
+        &BindGroupEntries::sequential((
+            amp_write,
+            &gpu.profile_buf_view,
+            height_write_view,
+            settings_buf.as_entire_binding(),
+        )),
+    );
+
+    commands.insert_resource(WaterBindGroups {
+        advection,
+        profile,
+        height,
+        settings_buf,
     });
 }

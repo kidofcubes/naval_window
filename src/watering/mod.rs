@@ -26,9 +26,9 @@ impl Plugin for Watering{
         app.add_systems(Update, (update,debug_update).chain());
     }
 }
-const GRID_X_SIZE: usize = 256;
-const GRID_Z_SIZE: usize = 256;
-const DIRECTIONS: usize = 16;
+const GRID_X_SIZE: usize = 128;
+const GRID_Z_SIZE: usize = 128;
+const DIRECTIONS: usize = 64;
 const TOTAL_WAVE_NUMBERS: usize = 1;
 const WAVE_NUMBERS: [f32; TOTAL_WAVE_NUMBERS] = [1.0];
 
@@ -155,9 +155,9 @@ fn update(
 
                     let mut new_magnitude = 0.0;
 
-                    new_magnitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32-1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index).length() * 0.15;
-                    new_magnitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index).length() * 0.70;
-                    new_magnitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index).length() * 0.15;
+                    new_magnitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32-1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index).length() * 0.25;
+                    new_magnitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index).length() * 0.50;
+                    new_magnitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+1i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index).length() * 0.25;
 
                     // new_amplitude += watering_stuff.sim_grid.bilinear_sample(prev_x, prev_z, (theta_index as i32+0i32).rem_euclid(DIRECTIONS as i32) as usize, wave_index) * 1.00;
 
