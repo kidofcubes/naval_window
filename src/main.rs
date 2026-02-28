@@ -4,22 +4,27 @@ mod voxelize;
 mod watering;
 mod mesh_optimize;
 
-use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, reflect::List, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, window::WindowResolution};
+use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, window::WindowResolution};
 use std::{env, path::{Path, PathBuf}};
 use std::ops::{Deref, DerefMut};
 use bevy::asset::UnapprovedPathMode;
 use bevy::ecs::event::Trigger;
 use bevy::ecs::system::IntoResult;
+use bevy::math::Affine3A;
 use bevy::picking::mesh_picking::ray_cast::SimplifiedMesh;
 use bevy::render::render_resource::{TextureDimension, TextureFormat};
 use naval_sketch::bevy_plugin::{argb_slice_to_color, place_part, BasePartMesh, NavalSketchPlugin};
 use naval_sketch::parsing::{load_save};
 use naval_sketch::parts::{AdjustableHull, BasePart, Part, PartRegistry};
 use naval_sketch::parts_loader::LocalPaths;
+use parry3d::transformation::vhacd::VHACDParameters;
 use crate::voxelize::{null_texture, render_voxel_grid, voxelize_meshes, VoxelGrid, VoxelizationConfig};
 use crate::cam_movement::CameraMovementPlugin;
-use crate::mesh_optimize::{combine_meshes, simplify_mesh};
+use crate::mesh_optimize::{combine_meshes, convex_decomposition, simplify_mesh};
 use crate::water::{CustomMaterial, WaterPlugin};
+
+
+/// plan: generate lowerpoly mesh of the hull, use that for displacing water and for wave reflections
 
 fn temp_test_update(
     //mut mesh_thing: ResMut<BuildData>,
@@ -115,7 +120,17 @@ fn temp_test_update(
         let combined_mesh = combine_meshes(&mesh_list).unwrap();
         println!("orig_tris {:?}",combined_mesh.count_vertices()/3);
         println!("indices {:?}",combined_mesh.indices().is_some());
-        let new_mesh = simplify_mesh(&combined_mesh, 0.01).unwrap();
+
+
+        let new_mesh = simplify_mesh(&combined_mesh, 0.001).unwrap();
+        // let new_meshes: Vec<Mesh> = convex_decomposition(&combined_mesh, Some(VHACDParameters {
+        //     concavity: 0.0001,
+        //     resolution: 512,
+        //     max_convex_hulls: 16384,
+        //     ..default()
+        // })).unwrap();
+        // let new_meshes_with_transform = new_meshes.iter().map(|x| (x, &GlobalTransform::IDENTITY)).collect::<Vec<_>>();
+        // let new_mesh = combine_meshes(&new_meshes_with_transform).unwrap();
         println!("tris {:?}",new_mesh.count_vertices()/3);
 
         let mesh_entity = commands.spawn((

@@ -8,6 +8,9 @@ use bevy::prelude::*;
 use bevy::mesh::{Mesh, Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::asset::RenderAssetUsages;
 use meshopt::{simplify_sloppy, typed_to_bytes, VertexDataAdapter};
+use parry3d::shape::{SharedShape, ConvexPolyhedron};
+use parry3d::transformation::vhacd::VHACDParameters;
+use parry3d::math::Pose3;
 
 /// Vertex struct for meshopt processing
 #[repr(C)]
@@ -217,4 +220,104 @@ pub fn compact_mesh(mesh: &Mesh) -> Option<Mesh> {
     compacted.compute_flat_normals();
 
     Some(compacted)
+}
+
+/// Decompose a mesh into convex hulls using V-HACD algorithm
+///
+/// Returns a vector of convex hull meshes that approximate the original mesh.
+/// Useful for physics collision shapes where convex geometry is required.
+///
+/// Parameters:
+/// - `mesh`: Input mesh to decompose
+/// - `params`: Optional VHACDParameters for fine-tuning (uses defaults if None)
+pub fn convex_decomposition(
+    mesh: &Mesh,
+    params: Option<VHACDParameters>,
+) -> anyhow::Result<Vec<Mesh>> {
+    // 1. Extract vertices as Vec<Vec3>
+    let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(VertexAttributeValues::Float32x3(p)) => p,
+        _ => return Err(anyhow!("no position attribute")),
+    };
+
+    let vertices: Vec<Vec3> = positions
+        .iter()
+        .map(|p| Vec3::new(p[0], p[1], p[2]))
+        .collect();
+
+    // 2. Extract indices as Vec<[u32; 3]>
+    let indices: Vec<[u32; 3]> = match mesh.indices() {
+        Some(Indices::U32(idx)) => idx.chunks(3)
+            .map(|c| [c[0], c[1], c[2]])
+            .collect(),
+        Some(Indices::U16(idx)) => idx.chunks(3)
+            .map(|c| [c[0] as u32, c[1] as u32, c[2] as u32])
+            .collect(),
+        None => return Err(anyhow!("no indices")),
+    };
+
+    // 3. Run convex decomposition
+    let params = params.unwrap_or_default();
+    let decomposed = SharedShape::convex_decomposition_with_params(
+        &vertices,
+        &indices,
+        &params,
+    );
+
+    // 4. Convert each convex hull back to Bevy Mesh
+    let mut result_meshes = Vec::new();
+
+    // decomposed is a Compound shape containing multiple convex parts
+    for (pose, shape) in decomposed.as_compound().unwrap().shapes() {
+        if let Some(convex) = shape.as_convex_polyhedron() {
+            let hull_mesh = convex_polyhedron_to_mesh(convex, pose)?;
+            result_meshes.push(hull_mesh);
+        }
+    }
+
+    Ok(result_meshes)
+}
+
+/// Convert a parry ConvexPolyhedron to a Bevy Mesh
+fn convex_polyhedron_to_mesh(
+    convex: &ConvexPolyhedron,
+    pose: &Pose3,
+) -> anyhow::Result<Mesh> {
+    let points = convex.points();
+
+    // Transform points by pose and convert to [f32; 3]
+    let vertices: Vec<[f32; 3]> = points
+        .iter()
+        .map(|p| {
+            let transformed = pose.rotation * *p + pose.translation;
+            [transformed.x, transformed.y, transformed.z]
+        })
+        .collect();
+
+    // Get triangle indices by triangulating convex hull faces
+    let mut flat_indices: Vec<u32> = Vec::new();
+    for face in convex.faces() {
+        let first_idx = face.first_vertex_or_edge;
+        let num_vertices = face.num_vertices_or_edges;
+        // Fan triangulation of the convex face
+        for i in 1..num_vertices - 1 {
+            let v0 = convex.vertices_adj_to_face()[first_idx as usize] as u32;
+            let v1 = convex.vertices_adj_to_face()[(first_idx + i) as usize] as u32;
+            let v2 = convex.vertices_adj_to_face()[(first_idx + i + 1) as usize] as u32;
+            flat_indices.push(v0);
+            flat_indices.push(v1);
+            flat_indices.push(v2);
+        }
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::all(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
+    mesh.insert_indices(Indices::U32(flat_indices));
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
+
+    Ok(mesh)
 }
