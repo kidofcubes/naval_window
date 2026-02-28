@@ -10,7 +10,7 @@
 @group(0) @binding(0) var profile_out: texture_storage_2d<r32float, write>;
 @group(0) @binding(1) var<uniform> settings: WaterSettings;
 
-@compute @workgroup_size(64, 1, 1)
+@compute @workgroup_size(128, 1, 1)
 fn build_profile(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let p = global_id.x;
 
@@ -21,7 +21,7 @@ fn build_profile(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // For each wave number, compute the profile value at this index
     for (var wave_index: u32 = 0u; wave_index < TOTAL_WAVE_NUMBERS; wave_index++) {
         // Wave number (matching CPU WAVE_NUMBERS)
-        let wave_number = 1.0;
+        let wave_number = 0.25;
 
         // Angular frequency: omega = sqrt(g * k)
         let angular_frequency = sqrt(GRAVITY * wave_number);

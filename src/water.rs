@@ -10,7 +10,7 @@ use bevy::shader::{ShaderDefVal, ShaderRef};
 use rand::{random, random_bool, random_range};
 use crate::{watering, BuildData};
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
-use crate::watering::{HeightFieldHandle, Watering};
+use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, Watering};
 
 const SHADER_ASSET_PATH: &str = "custom_material.wgsl";
 
@@ -47,7 +47,7 @@ fn setup(
     //         half_size: Vec2::new(50.0, 50.0),
     //         normal: Dir3::Y,
     //     });
-    let mesh = generate_dense_plane(Vec3::new(0.0, 1.0, 0.0), 512, 1000.0, 1000.0, -500.0,-500.0);
+    let mesh = generate_dense_plane(Vec3::new(0.0, 1.0, 0.0), 1024, 400.0, 400.0, -200.0,-200.0);
         // Sets the custom attribute
         // .with_inserted_attribute(
         //     ATTRIBUTE_BLEND_COLOR,
@@ -87,22 +87,34 @@ fn update(
     mut build_data: ResMut<BuildData>,
     mut images: ResMut<Assets<Image>>,
     key: Res<ButtonInput<KeyCode>>,
+    mut voxel_grid_handle: ResMut<VoxelGridHandle>,
+    mut voxel_settings: ResMut<VoxelSettings>,
     time: Res<Time>,
     mut gizmo: Gizmos,
 ){
     for (_, mut material) in materials.iter_mut() {
         // material.time = (time.elapsed().as_nanos() / (1000u128 * 1000u128 * 1000u128)) as f32;
         material.time = (time.elapsed().as_millis() as f32 / 1000.0) as f32;
-        if let Some(voxel_grid) = build_data.voxel_grid.as_ref() && key.pressed(KeyCode::KeyG) {
+        if let Some(voxel_grid) = build_data.voxel_grid.as_ref() && key.just_pressed(KeyCode::KeyG) {
             update_material(&mut material, voxel_grid, &mut images)
+
         }
     }
+    // if let Some(voxel_grid) = build_data.voxel_grid.as_ref() && key.just_pressed(KeyCode::KeyG) {
+    //     voxel_grid_handle.0 = create_voxel_texture(voxel_grid,&mut images);
+    //     voxel_settings.voxel_size = voxel_grid.voxel_size;
+    //     voxel_settings.water_to_world = Mat4::from_translation(voxel_grid.offset.into()).mul_mat4(&Mat4::from_scale(Vec3::splat(voxel_grid.voxel_size))).inverse();
+    //     voxel_settings.grid_dims = uvec3(voxel_grid.dimensions.0,voxel_grid.dimensions.1,voxel_grid.dimensions.2);
+    // }
 }
 fn update_material(mut material: &mut CustomMaterial, voxel_grid: &VoxelGrid, images: &mut Assets<Image>){
     println!("thing is {}",material.voxel_transform.mul_vec4(vec4(1.0,1.0,1.0,1.0)));
     material.voxel_grid = create_voxel_texture(voxel_grid,images);
     material.voxel_size = voxel_grid.voxel_size;
-    material.voxel_transform = Mat4::from_translation(voxel_grid.offset.into()).mul_mat4(&Mat4::from_scale(Vec3::splat(voxel_grid.voxel_size))).inverse();
+    // material.voxel_transform = Mat4::from_translation(voxel_grid.offset.into()).mul_mat4(&Mat4::from_scale(Vec3::splat(voxel_grid.voxel_size))).inverse();
+    // material.voxel_transform = Mat4::from_translation((-voxel_grid.offset).into()).mul_mat4(&Mat4::from_scale(Vec3::splat(1.0/voxel_grid.voxel_size)));
+    material.voxel_transform = Mat4::from_scale(Vec3::splat(1.0/voxel_grid.voxel_size)).mul_mat4(&Mat4::from_translation((-voxel_grid.offset).into()));
+    // material.voxel_transform = Mat4::from_translation((-voxel_grid.offset).into());
     // material.voxel_transform = Mat4::from_translation(voxel_grid.offset.into());
 }
 

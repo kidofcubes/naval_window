@@ -145,59 +145,6 @@ impl Source for VoxelGrid {
             // 0.5
             1.75 * 2.0
         }
-
-        // // // Convert normalized [0,1] coords to voxel coords
-        // // let vx = (x * (self.dimensions.0) as f32) as u32;
-        // // let vy = (y * (self.dimensions.1) as f32) as u32;
-        // // let vz = (z * (self.dimensions.2) as f32) as u32;
-        // //
-        // // // Clamp to valid range
-        // // let vx = vx.min(self.dimensions.0.saturating_sub(1));
-        // // let vy = vy.min(self.dimensions.1.saturating_sub(1));
-        // // let vz = vz.min(self.dimensions.2.saturating_sub(1));
-        // //
-        // // // Return negative if filled (inside), positive if empty (outside)
-        // // if (
-        // //         self.is_filled(vx+0, vy+0, vz+0).unwrap_or(false) &&
-        // //         self.is_filled(vx+0, vy+0, vz+1).unwrap_or(false) &&
-        // //         self.is_filled(vx+0, vy+1, vz+0).unwrap_or(false) &&
-        // //         self.is_filled(vx+0, vy+1, vz+1).unwrap_or(false) &&
-        // //         self.is_filled(vx+1, vy+0, vz+0).unwrap_or(false) &&
-        // //         self.is_filled(vx+1, vy+0, vz+1).unwrap_or(false) &&
-        // //         self.is_filled(vx+1, vy+1, vz+0).unwrap_or(false) &&
-        // //         self.is_filled(vx+1, vy+1, vz+1).unwrap_or(false)
-        // // ) {
-        // //     -1.0
-        // // } else {
-        // //     1.0
-        // // }
-        //
-        // // Convert normalized [0,1] coords to voxel coords
-        // let sub_vx = (x * ((self.dimensions.0 as f32*2.0)-1.0)) as u32;
-        // let sub_vy = (y * ((self.dimensions.1 as f32*2.0)-1.0)) as u32;
-        // let sub_vz = (z * ((self.dimensions.2 as f32*2.0)-1.0)) as u32;
-        //
-        // // Clamp to valid range
-        // let sub_vx = sub_vx.min(self.dimensions.0.saturating_sub(1)*2);
-        // let sub_vy = sub_vy.min(self.dimensions.1.saturating_sub(1)*2);
-        // let sub_vz = sub_vz.min(self.dimensions.2.saturating_sub(1)*2);
-        //
-        // let vx = sub_vx/2;
-        // let vy = sub_vy/2;
-        // let vz = sub_vz/2;
-        //
-        // // Return negative if filled (inside), positive if empty (outside)
-        // if self.is_filled(vx, vy, vz).unwrap_or(false) {
-        //     //we are in a filled, now to check if we're in the middle
-        //     if (vx*2 == (sub_vx-1) && vy*2 == (sub_vy-1) && vz*2 == (sub_vz-1)) {
-        //         //yes if in the middle of a filled
-        //         return -1.0;
-        //     }
-        //
-        //     -1.0
-        // } else {
-        //     1.0
-        // }
     }
 }
 
@@ -348,6 +295,42 @@ fn mark_triangle_voxels_boundary(grid: &mut VoxelGrid, v0: Vec3A, v1: Vec3A, v2:
     }
 }
 
+/// Marks all voxels that border empty voxels as boundary voxels
+pub fn mark_bordering_voxels_as_boundary(grid: &mut VoxelGrid) {
+    let (width, height, depth) = grid.dimensions;
+
+    // Iterate through all voxels in the grid
+    for z in 0..depth {
+        for y in 0..height {
+            for x in 0..width {
+                // Check if current voxel is filled
+                if let Some(is_filled) = grid.is_filled(x, y, z) {
+                    if is_filled {
+                        // Check if any neighboring voxel is empty
+                        let has_empty_neighbor =
+                            // Check 6 direct neighbors (up, down, left, right, front, back)
+                            (!grid.is_filled(x.wrapping_sub(1), y, z).unwrap_or(true)) ||
+                            (!grid.is_filled(x.wrapping_add(1), y, z).unwrap_or(true)) ||
+                            (!grid.is_filled(x, y.wrapping_sub(1), z).unwrap_or(true)) ||
+                            (!grid.is_filled(x, y.wrapping_add(1), z).unwrap_or(true)) ||
+                            (!grid.is_filled(x, y, z.wrapping_sub(1)).unwrap_or(true)) ||
+                            (!grid.is_filled(x, y, z.wrapping_add(1)).unwrap_or(true));
+
+                        // If voxel has an empty neighbor, mark it as boundary
+                        if has_empty_neighbor {
+                            grid.set_boundary(x, y, z);
+                        }
+                        //temp
+                        grid.set_boundary(x, y, z);
+                    }
+                }
+                // //temp
+                // grid.set_boundary(x, y, z);
+            }
+        }
+    }
+}
+
 pub fn voxelize_meshes(
     mesh_transform_pairs: Vec<(&Mesh, &GlobalTransform)>,
     config: VoxelizationConfig,
@@ -407,7 +390,8 @@ pub fn voxelize_meshes(
     }
 
     // Step 4: Mark boundary voxels using isosurface extraction
-    mark_boundary_voxels(&mut grid);
+    // mark_boundary_voxels(&mut grid);
+    mark_bordering_voxels_as_boundary(&mut grid);
 
     grid
 }

@@ -56,7 +56,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         0.0
     );
 //    offset.y += textureSampleLevel(wake_texture, wake_sampler, vertex.uv.xy, 0.0).r * 10.0;
-    offset.y += textureSampleLevel(height_field, height_field_sampler, vertex.uv.xy, 0.0).r * 10.0;
+    offset.y += textureSampleLevel(height_field, height_field_sampler, vertex.uv.xy, 0.0).r * 0.1;
 //    offset.y += textureLoad(wake_texture, vec2<i32>(vertex.uv.xy*256), 0).r * 10;
     let world_position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);
 
@@ -92,9 +92,12 @@ fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
     hull_distance = get_ship_distance_approx(input.world_position.xyz);
     hull_distance = clamp(hull_distance, 0.0, 3.0)/3.0;
     var color = vec4<f32>(26/255.0, 100/255.0, 200/255.0, 1.0);
+//    var color = vec4<f32>(0.0,0.0,0.0, 1.0);
     color = color + (vec4<f32>(1.0) * (1.0-hull_distance));
 
-    color = color + vec4<f32>(input.uv.xy-0.5, 0.0, 1.0);
+//    color = color + vec4<f32>(input.uv.xy, input.world_position.y/10.0, 1.0);
+    color = color + vec4<f32>(vec3<f32>(input.world_position.y/5.0), 1.0);
+//    color = color + vec4<f32>(input.uv.xy-0.5, 0.0, 1.0);
 
     return color;
 //    return vec4<f32>(input.world_position.xz, f32(center), 1.0);

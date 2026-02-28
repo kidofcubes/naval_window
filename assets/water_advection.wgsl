@@ -4,13 +4,15 @@
 
 #import "water_common.wgsl"::{
     GRID_X_SIZE, GRID_Z_SIZE, DIRECTIONS, TOTAL_WAVE_NUMBERS,
-    GRAVITY, TIME_MULT, TAU, WaterSettings, index_to_radians, layer_index
+    GRAVITY, TIME_MULT, TAU, WaterSettings, VoxelSettings, index_to_radians, layer_index
 }
 
 @group(0) @binding(0) var amplitude_in: texture_2d_array<f32>;
 @group(0) @binding(1) var amplitude_sampler: sampler;
 @group(0) @binding(2) var amplitude_out: texture_storage_2d_array<rg32float, write>;
 @group(0) @binding(3) var<uniform> settings: WaterSettings;
+@group(0) @binding(4) var voxel_texture: texture_3d<u32>;
+@group(0) @binding(5) var<uniform> voxel_settings: VoxelSettings;
 
 // Hardware bilinear sampling using sampler
 fn sample_amplitude(x: f32, z: f32, theta_index: u32, wave_index: u32) -> vec2<f32> {
@@ -31,7 +33,34 @@ fn wrap_direction(d: i32) -> u32 {
     return u32((d % i32(DIRECTIONS) + i32(DIRECTIONS)) % i32(DIRECTIONS));
 }
 
-@compute @workgroup_size(8, 8, 1)
+// Transform water grid coordinates to world space
+fn grid_to_voxel(grid_x: f32, grid_z: f32) -> vec3<f32> {
+    let grid_pos = vec4<f32>(grid_x, -1.11, grid_z, 1.0);
+    return (voxel_settings.water_to_voxel * grid_pos).xyz;
+//    return (grid_pos).xyz;
+}
+
+// Check if a world position is inside a voxel boundary
+fn is_boundary(voxel_pos: vec3<f32>) -> bool {
+    let dims = vec3<i32>(voxel_settings.grid_dims);
+    let voxel = vec3<i32>(voxel_pos);
+
+    if (voxel.x < 0 || voxel.x >= dims.x ||
+        voxel.y < 0 || voxel.y >= dims.y ||
+        voxel.z < 0 || voxel.z >= dims.z) {
+        return false;
+    }
+
+    let val = textureLoad(voxel_texture, voxel, 0).x;
+    return (val & 2u) != 0u;  // VOXEL_BOUNDARY = 0b10
+}
+
+// Reflect direction by 180 degrees
+fn reflect_direction(theta_index: u32) -> u32 {
+    return (theta_index + DIRECTIONS / 2u) % DIRECTIONS;
+}
+
+@compute @workgroup_size(32, 32, 1)
 fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let x = global_id.x;
     let z = global_id.y;
@@ -48,7 +77,7 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let layer = layer_index(theta_index, wave_index);
 
         // Wave number = 1.0 for now (matching CPU WAVE_NUMBERS[0])
-        let wave_number = 1.0;
+        let wave_number = 0.25;
 
         // Phase speed and group speed
         let phase_speed = sqrt(GRAVITY / wave_number);
@@ -62,24 +91,64 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let prev_x = f32(x) - dx;
         let prev_z = f32(z) - dz;
 
-        // Sample previous amplitude at current direction
-        let prev = sample_amplitude(prev_x, prev_z, theta_index, wave_index);
+        // Check if previous position is at a boundary
+//        let world_pos = ;
+        var new_amplitude: vec2<f32>;
 
-        // Directional blur - sample adjacent angles with weights
-        // This smooths the amplitude across nearby propagation directions
-        let theta_m1 = wrap_direction(i32(theta_index) - 1);
-        let theta_p1 = wrap_direction(i32(theta_index) + 1);
+//        if (is_boundary(grid_to_voxel(f32(x), f32(z)))) {
+//            new_amplitude = vec2<f32>(0.0,0.0);
+//        } else
+        if (is_boundary(grid_to_voxel(prev_x, prev_z))) {
+            // Reflect wave: sample from reflected direction with damping
+            let reflected = reflect_direction(theta_index);
+            let theta_r = index_to_radians(reflected);
 
-        let mag_m1 = length(sample_amplitude(prev_x, prev_z, theta_m1, wave_index));
-        let mag_0  = length(sample_amplitude(prev_x, prev_z, theta_index, wave_index));
-        let mag_p1 = length(sample_amplitude(prev_x, prev_z, theta_p1, wave_index));
+            let drx = cos(theta_r) * group_speed * settings.delta_time * TIME_MULT;
+            let drz = sin(theta_r) * group_speed * settings.delta_time * TIME_MULT;
 
-        // Weighted average of magnitudes
-        let new_magnitude = mag_m1 * 0.25 + mag_0 * 0.50 + mag_p1 * 0.25;
+            let prev_r_x = f32(x) - drx;
+            let prev_r_z = f32(z) - drz;
 
-        // Preserve the phase direction from the center sample
-        let normalized = normalize(select(vec2<f32>(1.0, 0.0), prev, length(prev) > 0.0001));
-        let new_amplitude = normalized * new_magnitude;
+            let reflected_amp = sample_amplitude(prev_r_x, prev_r_z, reflected, wave_index);
+            new_amplitude = reflected_amp * 1.0;
+//            if(!is_boundary(grid_to_voxel(prev_r_x,prev_r_z))){
+//                let reflected_amp = sample_amplitude(prev_r_x, prev_r_z, reflected, wave_index);
+//                new_amplitude = reflected_amp * 0.9;
+//    //            let prev = sample_amplitude(prev_x, prev_z, theta_index, wave_index);
+//    //            new_amplitude = prev * 20.0;
+//    //            new_amplitude = vec2<f32>(0.5,0.0);
+//            }else{
+//                new_amplitude = vec2<f32>(0.0,0.0);
+//            }
+
+//            new_amplitude = vec2<f32>(0.0,0.0);
+
+        } else {
+            // Normal advection
+            // Sample previous amplitude at current direction
+            let prev = sample_amplitude(prev_x, prev_z, theta_index, wave_index);
+
+            // Directional blur - sample adjacent angles with weights
+            // This smooths the amplitude across nearby propagation directions
+            let theta_m1 = wrap_direction(i32(theta_index) - 1);
+            let theta_p1 = wrap_direction(i32(theta_index) + 1);
+//            let gamma = 2 * 0.025 * group_speed * (settings.delta_time * TIME_MULT) * 1.0;
+            let gamma = 2 * 0.025 * group_speed * (settings.delta_time * TIME_MULT) * 0.5;
+
+            let mag_m1 = length(sample_amplitude(prev_x, prev_z, theta_m1, wave_index));
+            let mag_0  = length(sample_amplitude(prev_x, prev_z, theta_index, wave_index));
+            let mag_p1 = length(sample_amplitude(prev_x, prev_z, theta_p1, wave_index));
+
+            // Weighted average of magnitudes
+//            let new_magnitude = mag_m1 * 0.25 + mag_0 * 0.50 + mag_p1 * 0.25;
+//            let new_magnitude = (mag_m1 + mag_0 + mag_p1)/3.0;
+            let new_magnitude = (1.0-gamma) * mag_0 +
+                gamma * 0.5 * (mag_m1 + mag_p1);
+
+            // Preserve the phase direction from the center sample
+            let normalized = normalize(select(vec2<f32>(1.0, 0.0), prev, length(prev) > 0.0001));
+            new_amplitude = normalized * new_magnitude;
+        }
 
         // Write to output
         textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 1.0));

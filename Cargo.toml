@@ -7,7 +7,7 @@ resolver = "2"
 [dependencies]
 naval_sketch = { path = "../naval_sketch/crates/naval_sketch", features = ["bevy"] }
 #bevy = { version = "0.18.0", features = ["dynamic_linking", "wayland", "dev", "hotpatching"]}
-bevy = { version = "0.18.0", features = ["dynamic_linking", "wayland", "dev"]}
+bevy = { version = "0.18.0", features = ["dynamic_linking", "wayland", "dev", "shader_format_wesl"]}
 #dioxus-devtools = "0.7.3" #included to fix the version because this is used in bevy's hotpatching
 #notify-debouncer-full = "^0.6.0"
 anyhow = {  version = "1.0.101" , features = ["backtrace"]}
@@ -16,6 +16,7 @@ rand = "0.9.2"
 isosurface = "0.0.4"
 meshopt = "0.6.2"
 parry3d = "0.26"
+glam = {  version = "0.32.0", features = ["encase"]}
 
 
 # Enable max optimizations for dependencies, but not for our code:

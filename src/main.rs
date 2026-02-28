@@ -24,7 +24,6 @@ use crate::mesh_optimize::{combine_meshes, convex_decomposition, simplify_mesh};
 use crate::water::{CustomMaterial, WaterPlugin};
 
 
-/// plan: generate lowerpoly mesh of the hull, use that for displacing water and for wave reflections
 
 fn temp_test_update(
     //mut mesh_thing: ResMut<BuildData>,
@@ -95,7 +94,7 @@ fn temp_test_update(
             let config = VoxelizationConfig {
                 resolution: 64,
                 min_voxel_size: Some(0.25),
-                max_voxel_size: Some(1.00),
+                max_voxel_size: Some(0.25),
             };
             
             // Voxelize the meshes
@@ -184,11 +183,11 @@ struct InitData {
 }
 
 #[derive(Resource)]
-struct BuildData{
-    root_ship_entity: Option<Entity>,
-    voxel_grid: Option<VoxelGrid>,
+pub struct BuildData{
+    pub root_ship_entity: Option<Entity>,
+    pub voxel_grid: Option<VoxelGrid>,
     //reference to the entity that has the mesh
-    simplified_mesh: Option<Entity>,
+    pub simplified_mesh: Option<Entity>,
 }
 
 

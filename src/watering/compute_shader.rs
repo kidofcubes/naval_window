@@ -3,11 +3,13 @@ use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph;
 use bevy::render::render_graph::{NodeRunError, RenderGraphContext, RenderLabel};
 use bevy::render::render_resource::{encase, AddressMode, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, Extent3d, FilterMode, PipelineCache, SamplerDescriptor, ShaderStages, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
-use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, texture_storage_2d, texture_storage_2d_array, uniform_buffer};
+use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, texture_3d, texture_storage_2d, texture_storage_2d_array, uniform_buffer};
 use bevy::render::render_resource::Sampler;
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
-use crate::watering::{HeightFieldHandle, WaterDebugSettings, WaterSettings, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_WAVE_NUMBERS};
+use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_WAVE_NUMBERS};
+// use bevy::render::render_resource::encase::matrix::MatrixScalar;
+// use bevy::render::render_resource::encase::matrix::AsMutMatrixParts;
 
 // ─── GPU Resources ────────────────────────────────────────────────────────────
 
@@ -77,10 +79,10 @@ impl render_graph::Node for WaterSimulationNode {
         };
 
         // ── Workgroup counts ───────────────────────────────────────────────
-        // Each shader uses @workgroup_size(8, 8, 1) over the grid / profile.
-        let wg_grid    = (GRID_X_SIZE.div_ceil(8) as u32, GRID_Z_SIZE.div_ceil(8) as u32, DIRECTIONS as u32);
-        let wg_profile = (PROFILE_BUFFER_LENGTH.div_ceil(64) as u32, 1, 1);
-        let wg_height  = (RENDER_X_SIZE.div_ceil(8) as u32, RENDER_Z_SIZE.div_ceil(8) as u32, 1);
+        // Each shader uses @workgroup_size(64, 64, 1) over the grid / profile.
+        let wg_grid    = (GRID_X_SIZE.div_ceil(32) as u32, GRID_Z_SIZE.div_ceil(32) as u32, DIRECTIONS as u32);
+        let wg_profile = (PROFILE_BUFFER_LENGTH.div_ceil(128) as u32, 1, 1);
+        let wg_height  = (RENDER_X_SIZE.div_ceil(32) as u32, RENDER_Z_SIZE.div_ceil(32) as u32, 1);
 
         let encoder = ctx.command_encoder();
 
@@ -289,6 +291,8 @@ impl FromWorld for WaterPipelines {
         // Binding 1 : amplitude_sampler (Sampler)
         // Binding 2 : amplitude_out (Texture2DArray, WriteOnly storage)
         // Binding 3 : settings      (Uniform buffer)
+        // Binding 4 : voxel_texture (Texture3D, Uint)
+        // Binding 5 : voxel_settings (Uniform buffer)
         let advection_layout = BindGroupLayoutDescriptor::new(
             "advection_layout",
             &BindGroupLayoutEntries::sequential(
@@ -301,6 +305,8 @@ impl FromWorld for WaterPipelines {
                         StorageTextureAccess::WriteOnly,
                     ),
                     uniform_buffer::<WaterSettings>(false),
+                    texture_3d(bevy::render::render_resource::TextureSampleType::Uint),
+                    uniform_buffer::<VoxelSettings>(false),
                 ),
             ),
         );
@@ -421,6 +427,8 @@ pub struct WaterBindGroups {
     pub settings_buf: Buffer,
     /// Debug settings uniform buffer.
     pub debug_settings_buf: Buffer,
+    /// Voxel settings uniform buffer.
+    pub voxel_settings_buf: Buffer,
 }
 
 pub fn queue_bind_groups(
@@ -430,6 +438,8 @@ pub fn queue_bind_groups(
     gpu:           Option<ResMut<WaterGpuResources>>,
     settings:      Res<WaterSettings>,
     debug_settings: Res<WaterDebugSettings>,
+    voxel_settings: Res<VoxelSettings>,
+    voxel_handle:  Res<VoxelGridHandle>,
     existing_bgs:  Option<ResMut<WaterBindGroups>>,
     hf_handle:     Option<ResMut<HeightFieldHandle>>,
     render_images: Res<RenderAssets<GpuImage>>,
@@ -442,12 +452,17 @@ pub fn queue_bind_groups(
     // Get the GpuImage Bevy uploaded from your Image asset
     let Some(gpu_image) = render_images.get(&hf_handle.handle) else { return };
 
+    // Get the voxel grid texture
+    let Some(voxel_handle) = &voxel_handle.0 else { return };
+    let Some(voxel_gpu_image) = render_images.get(voxel_handle) else { return };
+    let voxel_texture_view = &voxel_gpu_image.texture_view;
+
     // This texture_view is the exact same texture the material will sample.
     // Use it as the compute shader's write target.
     let height_write_view = &gpu_image.texture_view;
 
     // ── Create or update the uniform buffers ────────────────────────────────
-    let (settings_buf, debug_settings_buf) = if let Some(mut bgs) = existing_bgs {
+    let (settings_buf, debug_settings_buf, voxel_settings_buf) = if let Some(mut bgs) = existing_bgs {
         // Write updated settings into the existing buffers.
         let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
         buf.write(&*settings).expect("ShaderType write failed");
@@ -457,10 +472,14 @@ pub fn queue_bind_groups(
         buf.write(&*debug_settings).expect("ShaderType write failed");
         queue.write_buffer(&bgs.debug_settings_buf, 0, buf.into_inner().as_slice());
 
+        let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
+        buf.write(&*voxel_settings).expect("ShaderType write failed");
+        queue.write_buffer(&bgs.voxel_settings_buf, 0, buf.into_inner().as_slice());
+
         // Flip ping-pong *after* updating, then rebuild bind groups
         // (they reference the new read/write views).
         gpu.flip = !gpu.flip;
-        (bgs.settings_buf.clone(), bgs.debug_settings_buf.clone())
+        (bgs.settings_buf.clone(), bgs.debug_settings_buf.clone(), bgs.voxel_settings_buf.clone())
     } else {
         // First frame – create buffers from scratch.
         let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
@@ -479,7 +498,15 @@ pub fn queue_bind_groups(
             usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
 
-        (settings_buf, debug_settings_buf)
+        let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
+        buf.write(&*voxel_settings).expect("ShaderType write failed");
+        let voxel_settings_buf = device.create_buffer_with_data(&BufferInitDescriptor {
+            label:    Some("water_voxel_settings_buf"),
+            contents: &buf.into_inner(),
+            usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+
+        (settings_buf, debug_settings_buf, voxel_settings_buf)
     };
 
     let (amp_read, amp_write) = gpu.amp_views();
@@ -503,6 +530,8 @@ pub fn queue_bind_groups(
             &gpu.amplitude_sampler,
             amp_write,
             settings_buf.as_entire_binding(),
+            voxel_texture_view,
+            voxel_settings_buf.as_entire_binding(),
         )),
     );
 
@@ -535,5 +564,6 @@ pub fn queue_bind_groups(
         height,
         settings_buf,
         debug_settings_buf,
+        voxel_settings_buf,
     });
 }

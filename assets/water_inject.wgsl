@@ -12,7 +12,7 @@
 @group(0) @binding(1) var<uniform> settings: WaterSettings;
 @group(0) @binding(2) var<uniform> debug_settings: WaterDebugSettings;
 
-@compute @workgroup_size(8, 8, 1)
+@compute @workgroup_size(32, 32, 1)
 fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let x = global_id.x;
     let z = global_id.y;
@@ -40,7 +40,7 @@ fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let dir = vec2<f32>(cos(theta), sin(theta));
 
     for (var wave_index: u32 = 0u; wave_index < TOTAL_WAVE_NUMBERS; wave_index++) {
-        let wave_number = 1.0;
+        let wave_number = 0.25;
         let angular_frequency = sqrt(GRAVITY * wave_number);
 
         // Position offset along wave direction
@@ -57,5 +57,6 @@ fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         let layer = layer_index(theta_index, wave_index);
         textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(amplitude, 0.0, 1.0));
+//        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(debug_settings.scale, 0.0, 0.0, 1.0));
     }
 }

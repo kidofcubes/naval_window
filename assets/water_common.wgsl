@@ -1,10 +1,10 @@
 //#define_import_path water_common
 
 // Grid dimensions
-const GRID_X_SIZE: u32 = 128u;
-const GRID_Z_SIZE: u32 = 128u;
-const RENDER_X_SIZE: u32 = 256u;
-const RENDER_Z_SIZE: u32 = 256u;
+const GRID_X_SIZE: u32 = 1024u;
+const GRID_Z_SIZE: u32 = 1024u;
+const RENDER_X_SIZE: u32 = 1024u;
+const RENDER_Z_SIZE: u32 = 1024u;
 const DIRECTIONS: u32 = 64u;
 const TOTAL_WAVE_NUMBERS: u32 = 1u;
 const PROFILE_BUFFER_LENGTH: u32 = 2048u;
@@ -31,6 +31,12 @@ struct WaterDebugSettings {
     _padding_a: f32,
     _padding_b: f32,
     _padding_c: f32,
+}
+
+struct VoxelSettings {
+    water_to_voxel: mat4x4<f32>,  // Transform water grid to voxel
+    voxel_size: f32,
+    grid_dims: vec3<u32>,
 }
 
 // Helper functions

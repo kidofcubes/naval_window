@@ -11,6 +11,7 @@ use bevy::render::renderer::RenderDevice;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use bevy::render::render_resource::{Extent3d, ShaderType, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages};
+use crate::BuildData;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::render::render_graph::RenderGraphExt;
 
@@ -34,12 +35,23 @@ impl Plugin for Watering{
                 _padding_b: 0.0,
                 _padding_c: 0.0,
             })
+            .insert_resource(VoxelSettings {
+                water_to_voxel: Mat4::IDENTITY,
+                voxel_size: 0.0,
+                grid_dims: Default::default(),
+            })
+            .insert_resource(VoxelGridHandle {
+                0: None
+            })
             .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
             .add_plugins(ExtractResourcePlugin::<HeightFieldHandle>::default())
             .add_plugins(ExtractResourcePlugin::<WaterDebugSettings>::default())
-            .add_systems(Startup, (setup_height_field))
+            .add_plugins(ExtractResourcePlugin::<VoxelSettings>::default())
+            .add_plugins(ExtractResourcePlugin::<VoxelGridHandle>::default())
+            .insert_resource(VoxelSettings::default())
+            .add_systems(Startup, (setup_height_field, setup_voxel_fallback))
             .add_systems(Update, debug_input_system)
-            .add_systems(Update, (tick_water_time))
+            .add_systems(Update, (tick_water_time, sync_voxel_grid))
         // Advance simulation time each frame
         // .add_systems(Update, (tick_water_time, sync_ship_position))
         ;
@@ -162,14 +174,14 @@ fn debug_input_system(
 }
 
 
-pub const GRID_X_SIZE: usize = 128;
-pub const GRID_Z_SIZE: usize = 128;
+pub const GRID_X_SIZE: usize = 1024;
+pub const GRID_Z_SIZE: usize = 1024;
 pub const DIRECTIONS: usize = 64;
 pub const TOTAL_WAVE_NUMBERS: usize = 1;
 const WAVE_NUMBERS: [f32; TOTAL_WAVE_NUMBERS] = [1.0];
 
-pub const RENDER_X_SIZE: usize = 256;
-pub const RENDER_Z_SIZE: usize = 256;
+pub const RENDER_X_SIZE: usize = 1024;
+pub const RENDER_Z_SIZE: usize = 1024;
 pub const PROFILE_BUFFER_LENGTH: usize = 2048;
 
 //to be put in main world
@@ -202,4 +214,60 @@ pub struct WaterDebugSettings {
     pub _padding_a: f32,
     pub _padding_b: f32,
     pub _padding_c: f32
+}
+
+/// Voxel grid settings for boundary detection in advection shader
+#[derive(Resource, ExtractResource, Clone, ShaderType)]
+pub struct VoxelSettings {
+    pub water_to_voxel: Mat4,  // Transform water grid coords to world space
+    pub voxel_size: f32,       // Size of each voxel
+    pub grid_dims: UVec3,      // Voxel grid dimensions
+}
+
+impl Default for VoxelSettings {
+    fn default() -> Self {
+        Self {
+            water_to_voxel: Mat4::IDENTITY,
+            voxel_size: 1.0,
+            grid_dims: UVec3::ONE,
+        }
+    }
+}
+
+/// Handle to the voxel grid 3D texture
+#[derive(Resource, ExtractResource, Clone)]
+pub struct VoxelGridHandle(pub Option<Handle<Image>>);
+
+fn setup_voxel_fallback(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    // let handle = crate::voxelize::null_texture(&mut images, TextureDimension::D3, TextureFormat::R8Uint);
+    // commands.insert_resource(VoxelGridHandle(handle));
+}
+
+fn sync_voxel_grid(
+    build_data: Res<BuildData>,
+    mut voxel_settings: ResMut<VoxelSettings>,
+    mut voxel_handle: ResMut<VoxelGridHandle>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    if let Some(ref grid) = build_data.voxel_grid {
+        voxel_settings.voxel_size = grid.voxel_size;
+        voxel_settings.grid_dims = UVec3::new(grid.dimensions.0, grid.dimensions.1, grid.dimensions.2);
+        // voxel_settings.water_to_voxel = Mat4::from_translation((vec3(-(GRID_X_SIZE as f32),0.0,-(GRID_Z_SIZE as f32)/2.0)) + (<Vec3A as Into<Vec3>>::into(grid.offset))).mul_mat4(&Mat4::from_scale(Vec3::splat(grid.voxel_size))).inverse();
+        // voxel_settings.water_to_voxel = Mat4::from_translation((-grid.offset).into()).mul_mat4(&Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size))).mul_mat4(&Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)));
+        // let grid_to_world = Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)).mul_mat4(&Mat4::from_scale(vec3(GRID_X_SIZE as f32/1000.0, 1.0, GRID_Z_SIZE as f32/1000.0)));
+        // let grid_to_world = Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)).mul_mat4(&Mat4::from_scale(vec3(1000.0/GRID_X_SIZE as f32, 1.0, 1000.0/GRID_Z_SIZE as f32)));
+        let grid_to_world = Mat4::from_scale(vec3(400.0/GRID_X_SIZE as f32, 1.0, 400.0/GRID_Z_SIZE as f32)).mul_mat4(&Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)));
+        // let grid_to_world = Mat4::from_scale(vec3(GRID_X_SIZE as f32/1000.0, 1.0, GRID_Z_SIZE as f32/1000.0)).mul_mat4(&Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)));
+        // voxel_settings.water_to_voxel = grid_to_world;
+        // voxel_settings.water_to_voxel = Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size)).mul_mat4(&Mat4::from_translation((-grid.offset).into())).mul_mat4(&grid_to_world);
+        // voxel_settings.water_to_voxel = grid_to_world.mul_mat4(&Mat4::from_translation((-grid.offset).into())).mul_mat4(&Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size)));
+        // voxel_settings.water_to_voxel = grid_to_world.mul_mat4(&Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size))).mul_mat4(&Mat4::from_translation((-grid.offset).into()));
+        // voxel_settings.water_to_voxel = grid_to_world.mul_mat4(&Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size)));
+        voxel_settings.water_to_voxel = Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size)).mul_mat4(&Mat4::from_translation((-grid.offset).into())).mul_mat4(&grid_to_world);
+        // voxel_settings.water_to_voxel = grid_to_world;
+        // voxel_settings.water_to_voxel = Mat4::IDENTITY;
+        if voxel_handle.0.is_none() {
+            voxel_handle.0 = Some(crate::voxelize::create_voxel_texture(grid, &mut images));
+        }
+    }
 }
