@@ -3,6 +3,7 @@
 //! This module provides functionality to combine multiple mesh parts into a single mesh
 //! and simplify them using the meshopt library for reduced triangle counts.
 
+use anyhow::anyhow;
 use bevy::prelude::*;
 use bevy::mesh::{Mesh, Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::asset::RenderAssetUsages;
@@ -75,42 +76,45 @@ pub fn combine_meshes(
     );
     combined.insert_attribute(Mesh::ATTRIBUTE_POSITION, all_vertices);
     combined.insert_indices(Indices::U32(all_indices));
-    combined.compute_flat_normals();
+    println!("are there indices? {:?}", combined.indices().is_some());
+    // combined.compute_flat_normals();
+    // combined.duplicate_vertices();
+    // combined.compute_flat_normals();
+    combined.compute_smooth_normals();
+    println!("are there indices? {:?}", combined.indices().is_some());
 
     Some(combined)
 }
 
 /// Simplify a mesh using meshopt
 ///
-/// The target_ratio parameter controls how much to simplify:
-/// - 1.0 = keep all triangles
-/// - 0.5 = target 50% of original triangles
-/// - 0.1 = target 10% of original triangles
+/// The target_error parameter controls the maximum allowed error during simplification.
+/// This is relative to mesh extents:
+/// - 0.01 = 1% error (high quality, less simplification)
+/// - 0.1 = 10% error (moderate quality)
+/// - 1.0 = 100% error (aggressive simplification)
 ///
-/// Note: The actual result may have more triangles than requested if
-/// simplifying further would cause too much visual degradation.
+/// The mesh will be simplified as much as possible while staying within
+/// the specified error threshold.
 pub fn simplify_mesh(
     mesh: &Mesh,
-    target_ratio: f32,
-) -> Option<Mesh> {
-    // Clamp target_ratio to valid range
-    let target_ratio = target_ratio.clamp(0.0, 1.0);
-
+    target_error: f32,
+) -> anyhow::Result<Mesh> {
     // Extract vertices
     let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
         Some(VertexAttributeValues::Float32x3(p)) => p,
-        _ => return None,
+        _ => return Err(anyhow!("no attribute")),
     };
 
     // Extract indices
     let indices: Vec<u32> = match mesh.indices() {
         Some(Indices::U32(idx)) => idx.clone(),
         Some(Indices::U16(idx)) => idx.iter().map(|&i| i as u32).collect(),
-        None => return None,
+        None => return Err(anyhow!("no indices")) ,
     };
 
     if indices.is_empty() || positions.is_empty() {
-        return None;
+        return Err(anyhow!("no indices or vertices")) ;
     }
 
     // Convert to Vertex structs for meshopt
@@ -128,13 +132,11 @@ pub fn simplify_mesh(
         0, // position offset in Vertex struct
     ) {
         Ok(a) => a,
-        Err(_) => return None,
+        Err(_) => return Err(anyhow!("meshopt adapter error")),
     };
 
-    // Calculate target index count (must be multiple of 3 for triangles)
-    let target_indices = ((indices.len() as f32) * target_ratio) as usize;
-    let target_indices = (target_indices / 3) * 3; // Round down to triangle boundary
-    let target_indices = target_indices.max(3); // At least one triangle
+    // Use minimum target count (3 indices = 1 triangle) to let error be the limiting factor
+    let target_indices = 3;
 
     // Simplify the mesh using sloppy simplification
     // This sacrifices some mesh appearance for better performance
@@ -143,12 +145,12 @@ pub fn simplify_mesh(
         &indices,
         &adapter,
         target_indices,
-        0.01, // target error (1% of mesh extent)
+        target_error,
         None,
     );
 
     if simplified_indices.is_empty() {
-        return None;
+        return Err(anyhow!("no simplified indices"));
     }
 
     // Build simplified mesh (reuse original vertices, only indices change)
@@ -158,24 +160,11 @@ pub fn simplify_mesh(
     );
     simplified.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions.clone());
     simplified.insert_indices(Indices::U32(simplified_indices));
+    simplified.duplicate_vertices();
     simplified.compute_flat_normals();
 
-    Some(simplified)
+    Ok(simplified)
 }
-
-/// Combined operation: merge ship meshes and simplify
-///
-/// This is a convenience function that combines multiple meshes into one
-/// and then simplifies the result. Useful for creating LOD versions of
-/// complex multi-part ships.
-pub fn combine_and_simplify_meshes(
-    mesh_transform_pairs: &[(&Mesh, &GlobalTransform)],
-    target_ratio: f32,
-) -> Option<Mesh> {
-    let combined = combine_meshes(mesh_transform_pairs)?;
-    simplify_mesh(&combined, target_ratio)
-}
-
 /// Remove unused vertices from a mesh after simplification
 ///
 /// The simplify function only reduces indices - unused vertices remain.
