@@ -56,7 +56,7 @@ fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
         );
 
         let layer = layer_index(theta_index, wave_index);
-        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(amplitude, 0.0, 1.0));
+        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(-amplitude, 0.0, 1.0));
 //        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(debug_settings.scale, 0.0, 0.0, 1.0));
     }
 }

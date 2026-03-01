@@ -146,7 +146,7 @@ fn temp_test_update(
 
         for (entity) in all_renderers.iter().map(|x| x.2) {
 
-            let new_hidden = if let Visibility::Hidden = visibility_query.get(entity).unwrap().1.deref() {Visibility::Visible} else {Visibility::Hidden};
+            let new_hidden = if let Visibility::Hidden = visibility_query.get(entity).unwrap().1 {Visibility::Visible} else {Visibility::Hidden};
             // *visibility_query.get_mut(entity).unwrap().1 = Visibility::Hidden;
             *visibility_query.get_mut(entity).unwrap().1 = new_hidden;
         }

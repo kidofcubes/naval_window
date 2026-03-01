@@ -69,9 +69,10 @@ impl render_graph::Node for WaterSimulationNode {
         let Some(bgs)      = world.get_resource::<WaterBindGroups>() else { return Ok(()) };
 
         // Fetch compiled pipelines — skip if any aren't ready yet.
-        let (Some(inj_pl), Some(adv_pl), Some(prof_pl), Some(hgt_pl)) = (
+        let (Some(inj_pl), Some(adv_pl), Some(diff_pl), Some(prof_pl), Some(hgt_pl)) = (
             pipeline_cache.get_compute_pipeline(pipelines.inject_id),
             pipeline_cache.get_compute_pipeline(pipelines.advection_id),
+            pipeline_cache.get_compute_pipeline(pipelines.diffusion_id),
             pipeline_cache.get_compute_pipeline(pipelines.profile_id),
             pipeline_cache.get_compute_pipeline(pipelines.height_id),
         ) else {
@@ -102,6 +103,7 @@ impl render_graph::Node for WaterSimulationNode {
         // ── Pass 1 : Advection ─────────────────────────────────────────────
         // Semi-Lagrangian advection of A(x, y, θ_d).
         // Dispatched once per direction in the Z dimension of the workgroup.
+        // Reads from amp_read, writes to amp_write.
         {
             let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label:            Some("water_advection"),
@@ -112,7 +114,20 @@ impl render_graph::Node for WaterSimulationNode {
             pass.dispatch_workgroups(wg_grid.0, wg_grid.1, wg_grid.2);
         }
 
-        // ── Pass 2 : Profile buffer ────────────────────────────────────────
+        // ── Pass 2 : Diffusion ────────────────────────────────────────────
+        // Directional diffusion of A(x, y, θ_d) - spreads energy between adjacent directions.
+        // Reads from amp_write, writes back to amp_read.
+        {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label:            Some("water_diffusion"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(diff_pl);
+            pass.set_bind_group(0, &bgs.diffusion, &[]);
+            pass.dispatch_workgroups(wg_grid.0, wg_grid.1, wg_grid.2);
+        }
+
+        // ── Pass 3 : Profile buffer ────────────────────────────────────────
         // Build Ψ(p) from the Phillips spectrum.
         // Done after advection so height reconstruction uses an up-to-date profile.
         {
@@ -125,7 +140,7 @@ impl render_graph::Node for WaterSimulationNode {
             pass.dispatch_workgroups(wg_profile.0, wg_profile.1, wg_profile.2);
         }
 
-        // ── Pass 3 : Height reconstruction ─────────────────────────────────
+        // ── Pass 4 : Height reconstruction ─────────────────────────────────
         // η(x, y) = Σ_d  A(x, y, d) · Ψ(k̂_d · x_world + φ_d)
         {
             let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
@@ -247,6 +262,7 @@ pub struct WaterPipelines {
     // ── Layouts ────────────────────────────────────────────────────────────
     pub inject_layout:    BindGroupLayoutDescriptor,
     pub advection_layout: BindGroupLayoutDescriptor,
+    pub diffusion_layout: BindGroupLayoutDescriptor,
     pub profile_layout:   BindGroupLayoutDescriptor,
     pub height_layout:    BindGroupLayoutDescriptor,
 
@@ -255,9 +271,11 @@ pub struct WaterPipelines {
     pub inject_id:    CachedComputePipelineId,
     /// Pass 1 – semi-Lagrangian advection of A(x, y, θ).
     pub advection_id: CachedComputePipelineId,
-    /// Pass 2 – build the 1-D profile buffer Ψ(p) from the Phillips spectrum.
+    /// Pass 2 – directional diffusion of A(x, y, θ).
+    pub diffusion_id: CachedComputePipelineId,
+    /// Pass 3 – build the 1-D profile buffer Ψ(p) from the Phillips spectrum.
     pub profile_id:   CachedComputePipelineId,
-    /// Pass 3 – reconstruct the visible height field η(x, y).
+    /// Pass 4 – reconstruct the visible height field η(x, y).
     pub height_id:    CachedComputePipelineId,
 }
 
@@ -311,6 +329,27 @@ impl FromWorld for WaterPipelines {
             ),
         );
 
+        // ── Diffusion layout ──────────────────────────────────────────────────
+        // Binding 0 : amplitude_in  (Texture2DArray, sampled)
+        // Binding 1 : amplitude_sampler (Sampler)
+        // Binding 2 : amplitude_out (Texture2DArray, WriteOnly storage)
+        // Binding 3 : settings      (Uniform buffer)
+        let diffusion_layout = BindGroupLayoutDescriptor::new(
+            "diffusion_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (
+                    texture_2d_array(bevy::render::render_resource::TextureSampleType::Float { filterable: true }),
+                    sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
+                    texture_storage_2d_array(
+                        TextureFormat::Rg32Float,
+                        StorageTextureAccess::WriteOnly,
+                    ),
+                    uniform_buffer::<WaterSettings>(false),
+                ),
+            ),
+        );
+
         // ── Profile layout ─────────────────────────────────────────────────
         // Binding 0 : profile_out (Texture2D 1×N, WriteOnly)
         // Binding 1 : settings    (Uniform)
@@ -358,6 +397,7 @@ impl FromWorld for WaterPipelines {
         // ── Load shaders ───────────────────────────────────────────────────
         let inject_shader  = asset_server.load("water_inject.wgsl");
         let adv_shader     = asset_server.load("water_advection.wgsl");
+        let diffusion_shader = asset_server.load("water_diffusion.wgsl");
         let profile_shader = asset_server.load("water_profile.wgsl");
         let height_shader  = asset_server.load("water_height.wgsl");
 
@@ -379,6 +419,16 @@ impl FromWorld for WaterPipelines {
             shader:                       adv_shader,
             shader_defs:                  vec![],
             entry_point:                  Some("advect".into()),
+            zero_initialize_workgroup_memory: false,
+        });
+
+        let diffusion_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label:                        Some("water_diffusion".into()),
+            layout:                       vec![diffusion_layout.clone()],
+            push_constant_ranges:         vec![],
+            shader:                       diffusion_shader,
+            shader_defs:                  vec![],
+            entry_point:                  Some("diffuse".into()),
             zero_initialize_workgroup_memory: false,
         });
 
@@ -405,10 +455,12 @@ impl FromWorld for WaterPipelines {
         Self {
             inject_layout,
             advection_layout,
+            diffusion_layout,
             profile_layout,
             height_layout,
             inject_id,
             advection_id,
+            diffusion_id,
             profile_id,
             height_id,
         }
@@ -421,6 +473,7 @@ impl FromWorld for WaterPipelines {
 pub struct WaterBindGroups {
     pub inject:    BindGroup,
     pub advection: BindGroup,
+    pub diffusion: BindGroup,
     pub profile:   BindGroup,
     pub height:    BindGroup,
     /// Settings uniform buffer (updated via write_buffer each frame).
@@ -522,6 +575,7 @@ pub fn queue_bind_groups(
         )),
     );
 
+    // Advection reads from amp_read, writes to amp_write
     let advection = device.create_bind_group(
         "advection_bg",
         &pipeline_cache.get_bind_group_layout(&pipelines.advection_layout),
@@ -535,6 +589,18 @@ pub fn queue_bind_groups(
         )),
     );
 
+    // Diffusion reads from amp_write (advection output), writes back to amp_read
+    let diffusion = device.create_bind_group(
+        "diffusion_bg",
+        &pipeline_cache.get_bind_group_layout(&pipelines.diffusion_layout),
+        &BindGroupEntries::sequential((
+            amp_write,
+            &gpu.amplitude_sampler,
+            amp_read,
+            settings_buf.as_entire_binding(),
+        )),
+    );
+
     let profile = device.create_bind_group(
         "profile_bg",
         &pipeline_cache.get_bind_group_layout(&pipelines.profile_layout),
@@ -544,12 +610,12 @@ pub fn queue_bind_groups(
         )),
     );
 
-    // Height reconstruction reads the *newly written* amplitude (amp_write).
+    // Height reconstruction reads the diffused amplitude (amp_read after diffusion writes to it).
     let height = device.create_bind_group(
         "height_bg",
         &pipeline_cache.get_bind_group_layout(&pipelines.height_layout),
         &BindGroupEntries::sequential((
-            amp_write,
+            amp_read,
             &gpu.amplitude_sampler,
             &gpu.profile_buf_view,
             height_write_view,
@@ -560,6 +626,7 @@ pub fn queue_bind_groups(
     commands.insert_resource(WaterBindGroups {
         inject,
         advection,
+        diffusion,
         profile,
         height,
         settings_buf,

@@ -23,14 +23,10 @@ fn sample_amplitude(x: f32, z: f32, theta_index: u32, wave_index: u32) -> vec2<f
 
     // Convert to normalized UV coordinates (0-1)
     // Add 0.5 to sample at texel centers
-    let uv = vec2<f32>((x + 0.5) / f32(GRID_X_SIZE), (z + 0.5) / f32(GRID_Z_SIZE));
+    let uv = vec2<f32>((f32(x) + 0.5) / f32(GRID_X_SIZE), (z + 0.5) / f32(GRID_Z_SIZE));
     let layer = layer_index(theta_index, wave_index);
 
     return textureSampleLevel(amplitude_in, amplitude_sampler, uv, layer, 0.0).xy;
-}
-
-fn wrap_direction(d: i32) -> u32 {
-    return u32((d % i32(DIRECTIONS) + i32(DIRECTIONS)) % i32(DIRECTIONS));
 }
 
 // Transform water grid coordinates to world space
@@ -124,30 +120,9 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
 //            new_amplitude = vec2<f32>(0.0,0.0);
 
         } else {
-            // Normal advection
-            // Sample previous amplitude at current direction
-            let prev = sample_amplitude(prev_x, prev_z, theta_index, wave_index);
-
-            // Directional blur - sample adjacent angles with weights
-            // This smooths the amplitude across nearby propagation directions
-            let theta_m1 = wrap_direction(i32(theta_index) - 1);
-            let theta_p1 = wrap_direction(i32(theta_index) + 1);
-//            let gamma = 2 * 0.025 * group_speed * (settings.delta_time * TIME_MULT) * 1.0;
-            let gamma = 2 * 0.025 * group_speed * (settings.delta_time * TIME_MULT) * 0.5;
-
-            let mag_m1 = length(sample_amplitude(prev_x, prev_z, theta_m1, wave_index));
-            let mag_0  = length(sample_amplitude(prev_x, prev_z, theta_index, wave_index));
-            let mag_p1 = length(sample_amplitude(prev_x, prev_z, theta_p1, wave_index));
-
-            // Weighted average of magnitudes
-//            let new_magnitude = mag_m1 * 0.25 + mag_0 * 0.50 + mag_p1 * 0.25;
-//            let new_magnitude = (mag_m1 + mag_0 + mag_p1)/3.0;
-            let new_magnitude = (1.0-gamma) * mag_0 +
-                gamma * 0.5 * (mag_m1 + mag_p1);
-
-            // Preserve the phase direction from the center sample
-            let normalized = normalize(select(vec2<f32>(1.0, 0.0), prev, length(prev) > 0.0001));
-            new_amplitude = normalized * new_magnitude;
+            // Normal advection - sample previous amplitude at current direction
+            // Directional diffusion is now handled in a separate pass
+            new_amplitude = sample_amplitude(prev_x, prev_z, theta_index, wave_index);
         }
 
         // Write to output
