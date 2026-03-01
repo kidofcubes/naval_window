@@ -4,8 +4,11 @@
 // This pass spreads energy between adjacent propagation directions
 
 #import "water_common.wgsl"::{
-    GRID_X_SIZE, GRID_Z_SIZE, DIRECTIONS, TOTAL_WAVE_NUMBERS,
-    GRAVITY, TIME_MULT, TAU, WaterSettings, index_to_radians, layer_index
+    GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
+    DIRECTIONS, TOTAL_WAVE_NUMBERS, PROFILE_BUFFER_LENGTH,
+    WAVE_NUMBERS, DIRECTIONAL_OFFSETS,
+    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings,
+    index_to_radians, layer_index
 }
 
 @group(0) @binding(0) var amplitude_in: texture_2d_array<f32>;
@@ -43,7 +46,7 @@ fn diffuse(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let layer = layer_index(theta_index, wave_index);
 
         // Wave parameters for computing gamma
-        let wave_number = 0.25;
+        let wave_number = WAVE_NUMBERS[wave_index];
         let phase_speed = sqrt(GRAVITY / wave_number);
         let group_speed = phase_speed / 2.0;
 

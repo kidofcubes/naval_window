@@ -3,8 +3,10 @@
 // Dispatched with workgroups (ceil(GRID_X/8), ceil(GRID_Z/8), DIRECTIONS)
 
 #import "water_common.wgsl"::{
-    GRID_X_SIZE, GRID_Z_SIZE, DIRECTIONS, TOTAL_WAVE_NUMBERS,
-    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings,
+    GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
+    DIRECTIONS, TOTAL_WAVE_NUMBERS, PROFILE_BUFFER_LENGTH,
+    WAVE_NUMBERS, DIRECTIONAL_OFFSETS,
+    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings,
     index_to_radians, layer_index
 }
 
@@ -40,7 +42,7 @@ fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let dir = vec2<f32>(cos(theta), sin(theta));
 
     for (var wave_index: u32 = 0u; wave_index < TOTAL_WAVE_NUMBERS; wave_index++) {
-        let wave_number = 0.25;
+        let wave_number = WAVE_NUMBERS[wave_index];
         let angular_frequency = sqrt(GRAVITY * wave_number);
 
         // Position offset along wave direction

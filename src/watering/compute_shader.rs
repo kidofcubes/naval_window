@@ -212,7 +212,7 @@ pub fn prepare_gpu_resources(
         mip_level_count:     1,
         sample_count:        1,
         dimension:           TextureDimension::D2,
-        format:              TextureFormat::R32Float,
+        format:              TextureFormat::Rgba32Float,
         usage:               TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
         view_formats:        &[],
     });
@@ -360,7 +360,7 @@ impl FromWorld for WaterPipelines {
                 ShaderStages::COMPUTE,
                 (
                     texture_storage_2d(
-                        TextureFormat::R32Float,
+                        TextureFormat::Rgba32Float,
                         StorageTextureAccess::WriteOnly,
                     ),
                     uniform_buffer::<WaterSettings>(false),
@@ -382,7 +382,7 @@ impl FromWorld for WaterPipelines {
                     texture_2d_array(bevy::render::render_resource::TextureSampleType::Float { filterable: true }),
                     sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
                     texture_storage_2d(
-                        TextureFormat::R32Float,
+                        TextureFormat::Rgba32Float,
                         StorageTextureAccess::ReadOnly,
                     ),
                     texture_storage_2d(
