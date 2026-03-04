@@ -63,8 +63,8 @@ fn reconstruct_height(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let sin_index = (wrapped_index + i32((3u * PROFILE_BUFFER_LENGTH) / 4u)) % i32(PROFILE_BUFFER_LENGTH);
 
             // Load profile values (cos and sin components)
-            let cos_val = textureLoad(profile_in, vec2<i32>(wrapped_index, i32(wave_index))).x;
-            let sin_val = textureLoad(profile_in, vec2<i32>(sin_index, i32(wave_index))).x;
+            let cos_val = textureLoad(profile_in, vec2<i32>(wrapped_index, i32(wave_index))).y;
+            let sin_val = textureLoad(profile_in, vec2<i32>(sin_index, i32(wave_index))).y;
 
             // Height contribution: Re(A) * cos - Im(A) * sin
             // This properly handles the complex amplitude with phase

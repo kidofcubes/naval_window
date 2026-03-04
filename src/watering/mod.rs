@@ -1,4 +1,5 @@
 mod compute_shader;
+mod pre_compute;
 
 use std::f32::consts::TAU;
 use std::time::Instant;
@@ -178,7 +179,9 @@ pub const GRID_X_SIZE: usize = 1024;
 pub const GRID_Z_SIZE: usize = 1024;
 pub const DIRECTIONS: usize = 64;
 pub const TOTAL_WAVE_NUMBERS: usize = 1;
-const WAVE_NUMBERS: [f32; TOTAL_WAVE_NUMBERS] = [1.0];
+pub const MIN_ZETA: f32 = 2.0;
+pub const MAX_ZETA: f32 = 2.0;
+const GRAVITY: f32 = 9.81;
 
 pub const RENDER_X_SIZE: usize = 1024;
 pub const RENDER_Z_SIZE: usize = 1024;

@@ -9,7 +9,10 @@ const DIRECTIONS: u32 = 64u;
 const TOTAL_WAVE_NUMBERS: u32 = 1u;
 const PROFILE_BUFFER_LENGTH: u32 = 2048u;
 
-//CONST ARRAYS
+// Wave parameters
+const ZETA_MIN: f32 = -5.059;
+const ZETA_MAX: f32 =  3.322;
+//const WAVE_NUMBERS = array<f32, 1>(1.0);
 const WAVE_NUMBERS = array<f32, 1>(1.0);
 const DIRECTIONAL_OFFSETS = array<f32, 64>(
     4.00209964, 0.62348099, 0.61843034, 6.26698587,
