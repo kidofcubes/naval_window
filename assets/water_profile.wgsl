@@ -20,7 +20,7 @@
 #import "water_common.wgsl"::{
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
-    WAVE_NUMBERS, DIRECTIONAL_OFFSETS,
+    ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
     GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
     index_to_radians, layer_index
 }
@@ -81,11 +81,10 @@ fn dispersion_relation(k: f32) -> f32 {
 // See ProfileBuffer.cpp::cubic_bump in the reference implementation.
 // ---------------------------------------------------------------------------
 fn cubic_bump(x: f32) -> f32 {
-    let ax = abs(x);
-    if ax >= 1.0 {
+    if abs(x) >= 1.0 {
         return 0.0;
     }
-    return ax * ax * (2.0 * ax - 3.0) + 1.0;
+    return x * x * (2.0 * abs(x) - 3.0) + 1.0;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,16 +125,16 @@ fn build_profile(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let zeta_full_range = ZETA_MAX - ZETA_MIN;
 
-    for (var wave_index: u32 = 0u; wave_index < TOTAL_WAVE_NUMBERS; wave_index++) {
+    for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
 
         // --- Determine this band's zeta range ---
         // The full [ZETA_MIN, ZETA_MAX] range is divided evenly among bands,
         // matching how WaveGrid sets up the zeta axis:
-        //   zeta_center = ZETA_MIN + (wave_index + 0.5) * band_width
+        //   zeta_center = ZETA_MIN + (zeta_index + 0.5) * band_width
         //   zeta_band_min = center - 0.5 * band_width
         //   zeta_band_max = center + 0.5 * band_width
-        let band_width    = zeta_full_range / f32(TOTAL_WAVE_NUMBERS);
-        let zeta_band_min = ZETA_MIN + f32(wave_index) * band_width;
+        let band_width    = zeta_full_range / f32(TOTAL_ZETA_NUMBERS);
+        let zeta_band_min = ZETA_MIN + f32(zeta_index) * band_width;
         let zeta_band_max = zeta_band_min + band_width;
 
         // --- Compute the period for this band ---
@@ -187,7 +186,7 @@ fn build_profile(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
             // Midpoint of this sub-interval in zeta space.
             // Matches: x = x_min + 0.5 * dx  (first node) in Integration.h
-            let zeta = zeta_band_min + (f32(i) + 0.5) * dz;
+            let zeta = zeta_band_min + ((f32(i) + 0.5) * dz);
 
             let wave_length = pow(2.0, zeta);
             let wave_number = TAU / wave_length;
@@ -205,7 +204,8 @@ fn build_profile(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let phase2 = wave_number * (p - period)
                        - omega * settings.elapsed_time * TIME_MULT;
 
-            let spec_weight = spectrum(zeta, settings.wind_speed);
+//            let spec_weight = spectrum(zeta, settings.wind_speed);
+            let spec_weight = spectrum(zeta, 3.0);
 
             // Blend the two phase evaluations with cubic_bump weights,
             // then scale by wavelength * spectrum density.
@@ -214,9 +214,13 @@ fn build_profile(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 cubic_bump(weight1) * gerstner_wave(phase1, wave_number) +
                 cubic_bump(weight2) * gerstner_wave(phase2, wave_number)
             );
+//            let contribution = wave_length * spec_weight * (
+//                gerstner_wave(phase1, wave_number)
+//            );
 
             // Accumulate using the midpoint rectangle rule weight dz.
             result += dz * contribution;
+//            result += 0.1 * contribution;
         }
 
         // --- Store the result ---
@@ -228,10 +232,17 @@ fn build_profile(@builtin(global_invocation_id) global_id: vec3<u32>) {
         //
         // In your reconstruction shader, sample this texture and use all 4 channels.
         // The normal is then cross(tx, ty) where tx and ty are built from .z and .w.
+
         textureStore(
             profile_out,
-            vec2<i32>(i32(p_idx), i32(wave_index)),
+            vec2<i32>(i32(p_idx), i32(zeta_index)),
             vec4<f32>(result.x, result.y, result.z, result.w)
         );
+
+//        textureStore(
+//            profile_out,
+//            vec2<i32>(i32(p_idx), i32(zeta_index)),
+//            vec4<f32>(0.0,cos(f32(p_idx) / TAU),0.0,0.0)
+//        );
     }
 }

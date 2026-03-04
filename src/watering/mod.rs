@@ -46,7 +46,7 @@ impl Plugin for Watering{
                 0: None
             })
             .insert_resource(WaterWaveGroupSpeeds {
-                wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_WAVE_NUMBERS).try_into().unwrap()
+                wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_WAVE_NUMBERS).iter().map(|x| vec4(*x,0.0,0.0,0.0)).collect::<Vec<_>>().try_into().unwrap()
             })
             .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
             .add_plugins(ExtractResourcePlugin::<HeightFieldHandle>::default())
@@ -106,26 +106,42 @@ pub fn setup_height_field(
     // mut hf_handle: ResMut<HeightFieldHandle>,
     // mut commands: Commands,
 ){
-    let hf_image = Image {
+    let offsets_image = Image {
         texture_descriptor: TextureDescriptor {
             label:               Some("height_field_mat"),
             size:                Extent3d { width: RENDER_X_SIZE as u32, height: RENDER_Z_SIZE as u32, depth_or_array_layers: 1 },
             mip_level_count:     1,
             sample_count:        1,
             dimension:           TextureDimension::D2,
-            format:              TextureFormat::R32Float,
+            format:              TextureFormat::Rgba32Float,
             usage:               TextureUsages::TEXTURE_BINDING
                 | TextureUsages::COPY_DST
                 | TextureUsages::STORAGE_BINDING,
             view_formats:        &[],
         },
-        data: Some(vec![0u8; (RENDER_X_SIZE * RENDER_Z_SIZE * 4) as usize]),
+        data: Some(vec![0u8; (RENDER_X_SIZE * RENDER_Z_SIZE * 16) as usize]),
         ..default()
     };
-    // hf_handle.0=images.add(hf_image);
-    commands.insert_resource(HeightFieldHandle{handle: images.add(hf_image)})
 
+    // Normal field texture (rgba32float for xyz normal + unused alpha)
+    let normal_image = Image {
+        texture_descriptor: TextureDescriptor {
+            label:               Some("normal_field_mat"),
+            size:                Extent3d { width: RENDER_X_SIZE as u32, height: RENDER_Z_SIZE as u32, depth_or_array_layers: 1 },
+            mip_level_count:     1,
+            sample_count:        1,
+            dimension:           TextureDimension::D2,
+            format:              TextureFormat::Rgba32Float,
+            usage:               TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::STORAGE_BINDING,
+            view_formats:        &[],
+        },
+        data: Some(vec![0u8; (RENDER_X_SIZE * RENDER_Z_SIZE * 16) as usize]), // 16 bytes per pixel (4 x f32)
+        ..default()
+    };
 
+    commands.insert_resource(HeightFieldHandle{ offsets_handle: images.add(offsets_image), normals_handle: images.add(normal_image)});
 }
 
 // ─── Update Systems ──────────────────────────────────────────────────────────
@@ -184,8 +200,8 @@ pub const GRID_X_SIZE: usize = 1024;
 pub const GRID_Z_SIZE: usize = 1024;
 pub const DIRECTIONS: usize = 64;
 pub const TOTAL_WAVE_NUMBERS: usize = 1;
-pub const MIN_ZETA: f32 = 2.0;
-pub const MAX_ZETA: f32 = 3.0;
+pub const MIN_ZETA: f32 = 1.0;
+pub const MAX_ZETA: f32 = 2.0;
 pub const WIND_SPEED: f32 = 3.0;
 const GRAVITY: f32 = 9.81;
 
@@ -205,7 +221,8 @@ pub struct WaterSettings {
 //to be put in main world
 #[derive(Resource, ExtractResource, Clone)]
 pub struct HeightFieldHandle {
-    pub handle: Handle<Image>
+    pub offsets_handle: Handle<Image>,
+    pub normals_handle: Handle<Image>
 }
 
 /// Debug settings for amplitude injection (extracted to render world)
@@ -235,7 +252,7 @@ pub struct VoxelSettings {
 
 #[derive(Resource, ExtractResource, Clone, ShaderType)]
 pub struct WaterWaveGroupSpeeds{
-    pub wave_group_speeds: [f32; TOTAL_WAVE_NUMBERS],
+    pub wave_group_speeds: [Vec4; TOTAL_WAVE_NUMBERS],
 }
 
 impl Default for VoxelSettings {

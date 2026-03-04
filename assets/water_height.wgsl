@@ -5,7 +5,7 @@
 #import "water_common.wgsl"::{
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
-    WAVE_NUMBERS, DIRECTIONAL_OFFSETS,
+    ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
     GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
     index_to_radians, layer_index
 }
@@ -13,8 +13,9 @@
 @group(0) @binding(0) var amplitude_in: texture_2d_array<f32>;
 @group(0) @binding(1) var amplitude_sampler: sampler;
 @group(0) @binding(2) var profile_in: texture_storage_2d<rgba32float, read>;
-@group(0) @binding(3) var height_out: texture_storage_2d<rg32float, write>;
-@group(0) @binding(4) var<uniform> settings: WaterSettings;
+@group(0) @binding(3) var height_out: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(4) var normal_out: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(5) var<uniform> settings: WaterSettings;
 
 // Hardware bilinear sample from amplitude texture array
 fn sample_amplitude(x: f32, z: f32, theta_index: u32, zeta_index: u32) -> vec2<f32> {
@@ -44,7 +45,10 @@ fn reconstruct_height(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var tx = vec3<f32>(0.0, 0.0, 0.0);
     var tz = vec3<f32>(0.0, 0.0, 0.0);
 
-    let direction_multiplier = 1.0/DIRECTIONS;
+//    let direction_multiplier = 1.0/f32(DIRECTIONS);
+    let direction_multiplier = 2.0;
+
+    var amplitude_sum = vec2<f32>(0.0, 0.0);
 
     for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
         for (var theta_index: u32 = 0u; theta_index < DIRECTIONS; theta_index++) {
@@ -53,12 +57,14 @@ fn reconstruct_height(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
             // Sample amplitude at this position and direction
             let amplitude = sample_amplitude(real_x, real_z, theta_index, zeta_index);
+            amplitude_sum += amplitude;
 
             // Position offset along wave direction
             let position_offset = dot(vec2<f32>(real_x, real_z), dir.xz);
 
             // Profile buffer index (wrapping)
-            let profile_coord = ((wave_number * position_offset / TAU) + (DIRECTIONAL_OFFSETS[theta_index]/4.0)) * f32(PROFILE_BUFFER_LENGTH);
+//            let profile_coord = ((wave_number * position_offset / TAU) + (DIRECTIONAL_OFFSETS[theta_index]/4.0)) * f32(PROFILE_BUFFER_LENGTH);
+            let profile_coord = position_offset + (DIRECTIONAL_OFFSETS[theta_index]/4.0);
             let profile_index = i32(profile_coord) % i32(PROFILE_BUFFER_LENGTH);
             let wrapped_index = select(profile_index, profile_index + i32(PROFILE_BUFFER_LENGTH), profile_index < 0);
 
@@ -74,8 +80,8 @@ fn reconstruct_height(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
             surface_offset.y += (amplitude.x * cos_val.y) - (amplitude.y * sin_val.y);
 
-            surface_offset.x += dir.x*((amplitude.x * cos_val.x) - (amplitude.x * sin_val));
-            surface_offset.z += dir.z*((amplitude.x * cos_val.x) - (amplitude.x * sin_val));
+            surface_offset.x += dir.x*((amplitude.x * cos_val.x) - (amplitude.y * sin_val.x));
+            surface_offset.z += dir.z*((amplitude.x * cos_val.x) - (amplitude.y * sin_val.x));
 
             tx.x += dir.x*((amplitude.x * cos_val.z) - (amplitude.y * sin_val.z));
             tx.y += dir.x*((amplitude.x * cos_val.w) - (amplitude.y * sin_val.w));
@@ -86,8 +92,11 @@ fn reconstruct_height(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     // Scale and store
+    let normal = normalize(cross(tx, tz));
 
-    let normal = normalize(tx * tz);
-
-//    textureStore(height_out, vec2<i32>(i32(render_x), i32(render_z)), vec4<f32>(height, 0.0, 0.0, 1.0));
+    let coord = vec2<i32>(i32(render_x), i32(render_z));
+    textureStore(height_out, coord, vec4<f32>(surface_offset, 1.0));
+//    textureStore(height_out, coord, vec4<f32>(vec3<f32>(0.0,surface_offset.y,0.0), 1.0));
+//    textureStore(height_out, coord, vec4<f32>(vec3<f32>(0.0,amplitude_sum.x,0.0), 1.0));
+    textureStore(normal_out, coord, vec4<f32>(normal, 1.0));
 }

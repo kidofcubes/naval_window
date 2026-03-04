@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph;
 use bevy::render::render_graph::{NodeRunError, RenderGraphContext, RenderLabel};
-use bevy::render::render_resource::{encase, AddressMode, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, Extent3d, FilterMode, PipelineCache, SamplerDescriptor, ShaderStages, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
+use bevy::render::render_resource::{encase, AddressMode, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, DynamicUniformBuffer, Extent3d, FilterMode, PipelineCache, SamplerDescriptor, ShaderStages, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
 use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, texture_3d, texture_storage_2d, texture_storage_2d_array, uniform_buffer};
 use bevy::render::render_resource::Sampler;
 use bevy::render::renderer::{RenderContext, RenderDevice};
@@ -225,7 +225,7 @@ pub fn prepare_gpu_resources(
         mip_level_count:     1,
         sample_count:        1,
         dimension:           TextureDimension::D2,
-        format:              TextureFormat::Rg32Float,
+        format:              TextureFormat::Rgba32Float,
         // TEXTURE_BINDING so the vertex shader can sample it via a sampler.
         // COPY_SRC so you can readback for buoyancy if needed.
         usage:               TextureUsages::STORAGE_BINDING
@@ -325,6 +325,7 @@ impl FromWorld for WaterPipelines {
                     uniform_buffer::<WaterSettings>(false),
                     texture_3d(bevy::render::render_resource::TextureSampleType::Uint),
                     uniform_buffer::<VoxelSettings>(false),
+                    uniform_buffer::<WaterWaveGroupSpeeds>(false),
                 ),
             ),
         );
@@ -346,6 +347,7 @@ impl FromWorld for WaterPipelines {
                         StorageTextureAccess::WriteOnly,
                     ),
                     uniform_buffer::<WaterSettings>(false),
+                    uniform_buffer::<WaterWaveGroupSpeeds>(false),
                 ),
             ),
         );
@@ -373,7 +375,8 @@ impl FromWorld for WaterPipelines {
         // Binding 1 : amplitude_sampler (Sampler)
         // Binding 2 : profile   (Texture2D, ReadOnly storage)
         // Binding 3 : height out (Texture2D, WriteOnly storage)
-        // Binding 4 : settings  (Uniform)
+        // Binding 4 : normal out (Texture2D, WriteOnly storage, rgba32float)
+        // Binding 5 : settings  (Uniform)
         let height_layout = BindGroupLayoutDescriptor::new(
             "height_layout",
             &BindGroupLayoutEntries::sequential(
@@ -386,7 +389,11 @@ impl FromWorld for WaterPipelines {
                         StorageTextureAccess::ReadOnly,
                     ),
                     texture_storage_2d(
-                        TextureFormat::Rg32Float,
+                        TextureFormat::Rgba32Float,
+                        StorageTextureAccess::WriteOnly,
+                    ),
+                    texture_storage_2d(
+                        TextureFormat::Rgba32Float,
                         StorageTextureAccess::WriteOnly,
                     ),
                     uniform_buffer::<WaterSettings>(false),
@@ -505,7 +512,8 @@ pub fn queue_bind_groups(
 
     let Some(hf_handle) = hf_handle else { return };
     // Get the GpuImage Bevy uploaded from your Image asset
-    let Some(gpu_image) = render_images.get(&hf_handle.handle) else { return };
+    let Some(offsets_gpu_image) = render_images.get(&hf_handle.offsets_handle) else { return };
+    let Some(normal_gpu_image) = render_images.get(&hf_handle.normals_handle) else { return };
 
     // Get the voxel grid texture
     let Some(voxel_handle) = &voxel_handle.0 else { return };
@@ -514,7 +522,8 @@ pub fn queue_bind_groups(
 
     // This texture_view is the exact same texture the material will sample.
     // Use it as the compute shader's write target.
-    let height_write_view = &gpu_image.texture_view;
+    let height_write_view = &offsets_gpu_image.texture_view;
+    let normal_write_view = &normal_gpu_image.texture_view;
 
     // ── Create or update the uniform buffers ────────────────────────────────
     let (settings_buf, debug_settings_buf, voxel_settings_buf, water_wave_group_speeds_buf) = if let Some(mut bgs) = existing_bgs {
@@ -563,7 +572,7 @@ pub fn queue_bind_groups(
             usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
 
-        let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
+        let mut buf = encase::DynamicUniformBuffer::new_with_alignment(Vec::<u8>::new(), 32);
         buf.write(&*water_wave_group_speeds).expect("ShaderType write failed");
         let water_wave_group_speeds_buf = device.create_buffer_with_data(&BufferInitDescriptor {
             label:    Some("water_wave_group_speeds_buf"),
@@ -633,6 +642,7 @@ pub fn queue_bind_groups(
             &gpu.amplitude_sampler,
             &gpu.profile_buf_view,
             height_write_view,
+            normal_write_view,
             settings_buf.as_entire_binding(),
         )),
     );

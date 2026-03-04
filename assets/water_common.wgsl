@@ -10,8 +10,8 @@ const TOTAL_ZETA_NUMBERS: u32 = 1u;
 const PROFILE_BUFFER_LENGTH: u32 = 2048u;
 
 // Wave parameters
-const ZETA_MIN: f32 = 2.0;
-const ZETA_MAX: f32 = 3.0;
+const ZETA_MIN: f32 = 1.0;
+const ZETA_MAX: f32 = 2.0;
 //const WAVE_NUMBERS = array<f32, 1>(1.0);
 const DIRECTIONAL_OFFSETS = array<f32, 64>(
     4.00209964, 0.62348099, 0.61843034, 6.26698587,
@@ -64,8 +64,7 @@ struct VoxelSettings {
 }
 
 struct WaterWaveGroupSpeeds{
-    @align(16)
-    wave_group_speeds: array<f32>,
+    wave_group_speeds: array<vec4<f32>,1>,
 }
 
 // Helper functions

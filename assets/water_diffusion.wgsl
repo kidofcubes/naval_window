@@ -6,7 +6,7 @@
 #import "water_common.wgsl"::{
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
-    WAVE_NUMBERS, DIRECTIONAL_OFFSETS,
+    ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
     GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
     index_to_radians, layer_index
 }
@@ -51,7 +51,7 @@ fn diffuse(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let theta_p1 = wrap_direction(i32(theta_index) + 1);
 
         // Diffusion coefficient
-        let gamma = 2.0 * 0.025 * (water_wave_group_speeds.wave_group_speeds[zeta_index]) * (settings.delta_time * TIME_MULT) * 0.5;
+        let gamma = 2.0 * 0.025 * (water_wave_group_speeds.wave_group_speeds[zeta_index].x) * (settings.delta_time * TIME_MULT) * 0.5;
 
         // Sample magnitudes from adjacent directions at current position
         let amp_m1 = sample_amplitude(x, z, theta_m1, zeta_index);

@@ -73,7 +73,8 @@ fn setup(
             voxel_transform: Mat4::IDENTITY,
             voxel_size: 0.5,
             voxel_grid: null_texture(images.as_mut(), TextureDimension::D3, TextureFormat::R8Uint),
-            height_map: height_field_handle.handle.clone(),
+            height_map: height_field_handle.offsets_handle.clone(),
+            normal_map: height_field_handle.normals_handle.clone(),
 
         })),
         // NoFrustumCulling,
@@ -135,6 +136,10 @@ pub struct CustomMaterial {
     #[texture(5, dimension = "2d", sample_type = "float")]
     #[sampler(6)]
     height_map: Handle<Image>,
+
+    #[texture(7, dimension = "2d", sample_type = "float")]
+    #[sampler(8)]
+    normal_map: Handle<Image>,
 
     // #[uniform(0)]
     // color: LinearRgba,

@@ -5,7 +5,7 @@
 #import "water_common.wgsl"::{
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
-    WAVE_NUMBERS, DIRECTIONAL_OFFSETS,
+    ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
     GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
     index_to_radians, layer_index
 }
@@ -76,7 +76,7 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
         let layer = layer_index(theta_index, zeta_index);
 
-        let group_speed = (water_wave_group_speeds.wave_group_speeds[zeta_index]);
+        let group_speed = (water_wave_group_speeds.wave_group_speeds[zeta_index].x);
 
         // Displacement based on group velocity
         let dx = cos(theta) * group_speed * settings.delta_time * TIME_MULT;
@@ -93,7 +93,8 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
 //        if (is_boundary(grid_to_voxel(f32(x), f32(z)))) {
 //            new_amplitude = vec2<f32>(0.0,0.0);
 //        } else
-        if (is_boundary(grid_to_voxel(prev_x, prev_z))) {
+//        if (is_boundary(grid_to_voxel(prev_x, prev_z))) {
+        if (false) {
             // Reflect wave: sample from reflected direction with damping
             let reflected = reflect_direction(theta_index);
             let theta_r = index_to_radians(reflected);
