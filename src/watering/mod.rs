@@ -15,6 +15,7 @@ use bevy::render::render_resource::{Extent3d, ShaderType, TextureDescriptor, Tex
 use crate::BuildData;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::render::render_graph::RenderGraphExt;
+use crate::watering::pre_compute::compute_group_speeds;
 
 pub struct Watering;
 impl Plugin for Watering{
@@ -44,11 +45,15 @@ impl Plugin for Watering{
             .insert_resource(VoxelGridHandle {
                 0: None
             })
+            .insert_resource(WaterWaveGroupSpeeds {
+                wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_WAVE_NUMBERS).try_into().unwrap()
+            })
             .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
             .add_plugins(ExtractResourcePlugin::<HeightFieldHandle>::default())
             .add_plugins(ExtractResourcePlugin::<WaterDebugSettings>::default())
             .add_plugins(ExtractResourcePlugin::<VoxelSettings>::default())
             .add_plugins(ExtractResourcePlugin::<VoxelGridHandle>::default())
+            .add_plugins(ExtractResourcePlugin::<WaterWaveGroupSpeeds>::default())
             .insert_resource(VoxelSettings::default())
             .add_systems(Startup, (setup_height_field, setup_voxel_fallback))
             .add_systems(Update, debug_input_system)
@@ -180,7 +185,8 @@ pub const GRID_Z_SIZE: usize = 1024;
 pub const DIRECTIONS: usize = 64;
 pub const TOTAL_WAVE_NUMBERS: usize = 1;
 pub const MIN_ZETA: f32 = 2.0;
-pub const MAX_ZETA: f32 = 2.0;
+pub const MAX_ZETA: f32 = 3.0;
+pub const WIND_SPEED: f32 = 3.0;
 const GRAVITY: f32 = 9.81;
 
 pub const RENDER_X_SIZE: usize = 1024;
@@ -225,6 +231,11 @@ pub struct VoxelSettings {
     pub water_to_voxel: Mat4,  // Transform water grid coords to world space
     pub voxel_size: f32,       // Size of each voxel
     pub grid_dims: UVec3,      // Voxel grid dimensions
+}
+
+#[derive(Resource, ExtractResource, Clone, ShaderType)]
+pub struct WaterWaveGroupSpeeds{
+    pub wave_group_speeds: [f32; TOTAL_WAVE_NUMBERS],
 }
 
 impl Default for VoxelSettings {

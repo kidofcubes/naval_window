@@ -6,14 +6,13 @@ const GRID_Z_SIZE: u32 = 1024u;
 const RENDER_X_SIZE: u32 = 1024u;
 const RENDER_Z_SIZE: u32 = 1024u;
 const DIRECTIONS: u32 = 64u;
-const TOTAL_WAVE_NUMBERS: u32 = 1u;
+const TOTAL_ZETA_NUMBERS: u32 = 1u;
 const PROFILE_BUFFER_LENGTH: u32 = 2048u;
 
 // Wave parameters
-const ZETA_MIN: f32 = -5.059;
-const ZETA_MAX: f32 =  3.322;
+const ZETA_MIN: f32 = 2.0;
+const ZETA_MAX: f32 = 3.0;
 //const WAVE_NUMBERS = array<f32, 1>(1.0);
-const WAVE_NUMBERS = array<f32, 1>(1.0);
 const DIRECTIONAL_OFFSETS = array<f32, 64>(
     4.00209964, 0.62348099, 0.61843034, 6.26698587,
     6.17683248, 2.22353755, 5.95109020, 5.17058900,
@@ -64,11 +63,16 @@ struct VoxelSettings {
     grid_dims: vec3<u32>,
 }
 
+struct WaterWaveGroupSpeeds{
+    @align(16)
+    wave_group_speeds: array<f32>,
+}
+
 // Helper functions
 fn index_to_radians(i: u32) -> f32 {
     return f32(i) * (TAU / f32(DIRECTIONS));
 }
 
-fn layer_index(theta_index: u32, wave_index: u32) -> i32 {
-    return i32(wave_index * DIRECTIONS + theta_index);
+fn layer_index(theta_index: u32, zeta_index: u32) -> i32 {
+    return i32(zeta_index * DIRECTIONS + theta_index);
 }

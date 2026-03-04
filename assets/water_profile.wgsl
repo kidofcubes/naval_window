@@ -19,9 +19,9 @@
 
 #import "water_common.wgsl"::{
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
-    DIRECTIONS, TOTAL_WAVE_NUMBERS, PROFILE_BUFFER_LENGTH,
-    ZETA_MIN, ZETA_MAXWAVE_NUMBERS, DIRECTIONAL_OFFSETS,
-    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings,
+    DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
+    WAVE_NUMBERS, DIRECTIONAL_OFFSETS,
+    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
     index_to_radians, layer_index
 }
 

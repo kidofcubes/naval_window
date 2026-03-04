@@ -7,7 +7,7 @@ use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, te
 use bevy::render::render_resource::Sampler;
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
-use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_WAVE_NUMBERS};
+use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_WAVE_NUMBERS};
 // use bevy::render::render_resource::encase::matrix::MatrixScalar;
 // use bevy::render::render_resource::encase::matrix::AsMutMatrixParts;
 
@@ -225,7 +225,7 @@ pub fn prepare_gpu_resources(
         mip_level_count:     1,
         sample_count:        1,
         dimension:           TextureDimension::D2,
-        format:              TextureFormat::R32Float,
+        format:              TextureFormat::Rg32Float,
         // TEXTURE_BINDING so the vertex shader can sample it via a sampler.
         // COPY_SRC so you can readback for buoyancy if needed.
         usage:               TextureUsages::STORAGE_BINDING
@@ -386,7 +386,7 @@ impl FromWorld for WaterPipelines {
                         StorageTextureAccess::ReadOnly,
                     ),
                     texture_storage_2d(
-                        TextureFormat::R32Float,
+                        TextureFormat::Rg32Float,
                         StorageTextureAccess::WriteOnly,
                     ),
                     uniform_buffer::<WaterSettings>(false),
@@ -482,6 +482,7 @@ pub struct WaterBindGroups {
     pub debug_settings_buf: Buffer,
     /// Voxel settings uniform buffer.
     pub voxel_settings_buf: Buffer,
+    pub water_wave_group_speeds_buf: Buffer,
 }
 
 pub fn queue_bind_groups(
@@ -493,6 +494,7 @@ pub fn queue_bind_groups(
     debug_settings: Res<WaterDebugSettings>,
     voxel_settings: Res<VoxelSettings>,
     voxel_handle:  Res<VoxelGridHandle>,
+    water_wave_group_speeds:  Res<WaterWaveGroupSpeeds>,
     existing_bgs:  Option<ResMut<WaterBindGroups>>,
     hf_handle:     Option<ResMut<HeightFieldHandle>>,
     render_images: Res<RenderAssets<GpuImage>>,
@@ -515,7 +517,7 @@ pub fn queue_bind_groups(
     let height_write_view = &gpu_image.texture_view;
 
     // ── Create or update the uniform buffers ────────────────────────────────
-    let (settings_buf, debug_settings_buf, voxel_settings_buf) = if let Some(mut bgs) = existing_bgs {
+    let (settings_buf, debug_settings_buf, voxel_settings_buf, water_wave_group_speeds_buf) = if let Some(mut bgs) = existing_bgs {
         // Write updated settings into the existing buffers.
         let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
         buf.write(&*settings).expect("ShaderType write failed");
@@ -529,10 +531,12 @@ pub fn queue_bind_groups(
         buf.write(&*voxel_settings).expect("ShaderType write failed");
         queue.write_buffer(&bgs.voxel_settings_buf, 0, buf.into_inner().as_slice());
 
+        // no water_wave_group_speeds_buf because it doesn't need to be updated
+
         // Flip ping-pong *after* updating, then rebuild bind groups
         // (they reference the new read/write views).
         gpu.flip = !gpu.flip;
-        (bgs.settings_buf.clone(), bgs.debug_settings_buf.clone(), bgs.voxel_settings_buf.clone())
+        (bgs.settings_buf.clone(), bgs.debug_settings_buf.clone(), bgs.voxel_settings_buf.clone(), bgs.water_wave_group_speeds_buf.clone())
     } else {
         // First frame – create buffers from scratch.
         let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
@@ -559,7 +563,15 @@ pub fn queue_bind_groups(
             usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
 
-        (settings_buf, debug_settings_buf, voxel_settings_buf)
+        let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
+        buf.write(&*water_wave_group_speeds).expect("ShaderType write failed");
+        let water_wave_group_speeds_buf = device.create_buffer_with_data(&BufferInitDescriptor {
+            label:    Some("water_wave_group_speeds_buf"),
+            contents: &buf.into_inner(),
+            usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+
+        (settings_buf, debug_settings_buf, voxel_settings_buf, water_wave_group_speeds_buf)
     };
 
     let (amp_read, amp_write) = gpu.amp_views();
@@ -586,6 +598,7 @@ pub fn queue_bind_groups(
             settings_buf.as_entire_binding(),
             voxel_texture_view,
             voxel_settings_buf.as_entire_binding(),
+            water_wave_group_speeds_buf.as_entire_binding(),
         )),
     );
 
@@ -598,6 +611,7 @@ pub fn queue_bind_groups(
             &gpu.amplitude_sampler,
             amp_read,
             settings_buf.as_entire_binding(),
+            water_wave_group_speeds_buf.as_entire_binding(),
         )),
     );
 
@@ -632,5 +646,6 @@ pub fn queue_bind_groups(
         settings_buf,
         debug_settings_buf,
         voxel_settings_buf,
+        water_wave_group_speeds_buf,
     });
 }

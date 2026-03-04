@@ -4,9 +4,9 @@
 
 #import "water_common.wgsl"::{
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
-    DIRECTIONS, TOTAL_WAVE_NUMBERS, PROFILE_BUFFER_LENGTH,
+    DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
     WAVE_NUMBERS, DIRECTIONAL_OFFSETS,
-    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings,
+    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
     index_to_radians, layer_index
 }
 
@@ -16,6 +16,7 @@
 @group(0) @binding(3) var<uniform> settings: WaterSettings;
 @group(0) @binding(4) var voxel_texture: texture_3d<u32>;
 @group(0) @binding(5) var<uniform> voxel_settings: VoxelSettings;
+@group(0) @binding(6) var<uniform> water_wave_group_speeds: WaterWaveGroupSpeeds;
 
 // Hardware bilinear sampling using sampler
 fn sample_amplitude(x: f32, z: f32, theta_index: u32, wave_index: u32) -> vec2<f32> {
@@ -72,15 +73,10 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let theta = index_to_radians(theta_index);
 
-    for (var wave_index: u32 = 0u; wave_index < TOTAL_WAVE_NUMBERS; wave_index++) {
-        let layer = layer_index(theta_index, wave_index);
+    for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
+        let layer = layer_index(theta_index, zeta_index);
 
-        // Wave number = 1.0 for now (matching CPU WAVE_NUMBERS[0])
-        let wave_number = WAVE_NUMBERS[wave_index];
-
-        // Phase speed and group speed
-        let phase_speed = sqrt(GRAVITY / wave_number);
-        let group_speed = phase_speed / 2.0;
+        let group_speed = (water_wave_group_speeds.wave_group_speeds[zeta_index]);
 
         // Displacement based on group velocity
         let dx = cos(theta) * group_speed * settings.delta_time * TIME_MULT;
@@ -108,12 +104,12 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let prev_r_x = f32(x) - drx;
             let prev_r_z = f32(z) - drz;
 
-            let reflected_amp = sample_amplitude(prev_r_x, prev_r_z, reflected, wave_index);
+            let reflected_amp = sample_amplitude(prev_r_x, prev_r_z, reflected, zeta_index);
             new_amplitude = reflected_amp * 1.0;
 //            if(!is_boundary(grid_to_voxel(prev_r_x,prev_r_z))){
-//                let reflected_amp = sample_amplitude(prev_r_x, prev_r_z, reflected, wave_index);
+//                let reflected_amp = sample_amplitude(prev_r_x, prev_r_z, reflected, zeta_index);
 //                new_amplitude = reflected_amp * 0.9;
-//    //            let prev = sample_amplitude(prev_x, prev_z, theta_index, wave_index);
+//    //            let prev = sample_amplitude(prev_x, prev_z, theta_index, zeta_index);
 //    //            new_amplitude = prev * 20.0;
 //    //            new_amplitude = vec2<f32>(0.5,0.0);
 //            }else{
@@ -125,7 +121,7 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             // Normal advection - sample previous amplitude at current direction
             // Directional diffusion is now handled in a separate pass
-            new_amplitude = sample_amplitude(prev_x, prev_z, theta_index, wave_index);
+            new_amplitude = sample_amplitude(prev_x, prev_z, theta_index, zeta_index);
         }
 
         // Write to output

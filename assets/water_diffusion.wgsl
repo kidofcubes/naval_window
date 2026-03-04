@@ -5,9 +5,9 @@
 
 #import "water_common.wgsl"::{
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
-    DIRECTIONS, TOTAL_WAVE_NUMBERS, PROFILE_BUFFER_LENGTH,
+    DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
     WAVE_NUMBERS, DIRECTIONAL_OFFSETS,
-    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings,
+    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
     index_to_radians, layer_index
 }
 
@@ -15,6 +15,7 @@
 @group(0) @binding(1) var amplitude_sampler: sampler;
 @group(0) @binding(2) var amplitude_out: texture_storage_2d_array<rg32float, write>;
 @group(0) @binding(3) var<uniform> settings: WaterSettings;
+@group(0) @binding(4) var<uniform> water_wave_group_speeds: WaterWaveGroupSpeeds;
 
 fn sample_amplitude(x: u32, z: u32, theta_index: u32, wave_index: u32) -> vec2<f32> {
 //    if (x < 1.0 || x >= f32(GRID_X_SIZE - 1u) || z < 1.0 || z >= f32(GRID_Z_SIZE - 1u)) {
@@ -42,25 +43,20 @@ fn diffuse(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let theta = index_to_radians(theta_index);
 
-    for (var wave_index: u32 = 0u; wave_index < TOTAL_WAVE_NUMBERS; wave_index++) {
-        let layer = layer_index(theta_index, wave_index);
-
-        // Wave parameters for computing gamma
-        let wave_number = WAVE_NUMBERS[wave_index];
-        let phase_speed = sqrt(GRAVITY / wave_number);
-        let group_speed = phase_speed / 2.0;
+    for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
+        let layer = layer_index(theta_index, zeta_index);
 
         // Adjacent directions
         let theta_m1 = wrap_direction(i32(theta_index) - 1);
         let theta_p1 = wrap_direction(i32(theta_index) + 1);
 
         // Diffusion coefficient
-        let gamma = 2.0 * 0.025 * group_speed * (settings.delta_time * TIME_MULT) * 0.5;
+        let gamma = 2.0 * 0.025 * (water_wave_group_speeds.wave_group_speeds[zeta_index]) * (settings.delta_time * TIME_MULT) * 0.5;
 
         // Sample magnitudes from adjacent directions at current position
-        let amp_m1 = sample_amplitude(x, z, theta_m1, wave_index);
-        let amp_0  = sample_amplitude(x, z, theta_index, wave_index);
-        let amp_p1 = sample_amplitude(x, z, theta_p1, wave_index);
+        let amp_m1 = sample_amplitude(x, z, theta_m1, zeta_index);
+        let amp_0  = sample_amplitude(x, z, theta_index, zeta_index);
+        let amp_p1 = sample_amplitude(x, z, theta_p1, zeta_index);
 
         let mag_m1 = length(amp_m1);
         let mag_0  = length(amp_0);
