@@ -79,8 +79,8 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let group_speed = (water_wave_group_speeds.wave_group_speeds[zeta_index].x);
 
         // Displacement based on group velocity
-        let dx = cos(theta) * group_speed * settings.delta_time * TIME_MULT;
-        let dz = sin(theta) * group_speed * settings.delta_time * TIME_MULT;
+        let dx = cos(theta) * group_speed * settings.delta_time;
+        let dz = sin(theta) * group_speed * settings.delta_time;
 
         // Previous position (semi-Lagrangian)
         let prev_x = f32(x) - dx;
@@ -99,8 +99,8 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let reflected = reflect_direction(theta_index);
             let theta_r = index_to_radians(reflected);
 
-            let drx = cos(theta_r) * group_speed * settings.delta_time * TIME_MULT;
-            let drz = sin(theta_r) * group_speed * settings.delta_time * TIME_MULT;
+            let drx = cos(theta_r) * group_speed * settings.delta_time;
+            let drz = sin(theta_r) * group_speed * settings.delta_time;
 
             let prev_r_x = f32(x) - drx;
             let prev_r_z = f32(z) - drz;

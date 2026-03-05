@@ -18,8 +18,8 @@
 fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let x = global_id.x;
     let z = global_id.y;
-    let theta_index = global_id.z;
-//    let theta_index: u32 = 0;
+//    let theta_index = global_id.z;
+    let theta_index: u32 = 0;
 
     // Bounds check
     if (x >= GRID_X_SIZE || z >= GRID_Z_SIZE || theta_index >= DIRECTIONS) {
@@ -40,17 +40,35 @@ fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     let theta = index_to_radians(theta_index);
-    let dir = vec2<f32>(cos(theta), sin(theta));
+    let dir = vec3<f32>(cos(theta), 0.0, sin(theta));
+    let zeta_full_range = ZETA_MAX - ZETA_MIN;
 
     for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
+        let min_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) - 0.0) / f32(TOTAL_ZETA_NUMBERS)));
+        let max_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 1.0) / f32(TOTAL_ZETA_NUMBERS)));
+
+
+//        let zeta = min_zeta + ((max_zeta - min_zeta) * ((f32(0.0) + 0.5) / f32(1.0)));
+        let zeta = max_zeta; //works if both is max_zeta
+//        let period: f32 = f32(2.0) * pow(2,max_zeta);
+
+        let waveLength = pow(2, zeta);
+        let wave_number = TAU / waveLength;
+//        let wave_number = TAU / waveLength2;
 //        let wave_number = WAVE_NUMBERS[zeta_index];
 //        let angular_frequency = sqrt(GRAVITY * wave_number);
 
         // Position offset along wave direction
-        let position_offset = dot(pos, dir);
+        let position_offset = dot(vec2<f32>(f32(x), f32(z)), vec2<f32>(dir.x, dir.z));
 
-        // Phase coordinate: counteract both position and time to create stationary source
-        let phase_coordinate = (1.0 * position_offset) - (settings.elapsed_time * TIME_MULT);
+
+
+        let spatial_phase = (wave_number * ((position_offset+(settings.elapsed_time*0.00)) + (DIRECTIONAL_OFFSETS[theta_index]/1.0)))
+                         - (sqrt(GRAVITY * wave_number) * ((settings.elapsed_time)));
+
+
+        let phase_coordinate = spatial_phase;
+
 
         // Create amplitude with correct phase
         let amplitude = vec2<f32>(
@@ -59,7 +77,7 @@ fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
         );
 
         let layer = layer_index(theta_index, zeta_index);
-//        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(-amplitude, 0.0, 1.0));
-        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(debug_settings.scale, 0.0, 0.0, 1.0));
+        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(amplitude, 0.0, 1.0));
+//        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(debug_settings.scale, 0.0, 0.0, 1.0));
     }
 }

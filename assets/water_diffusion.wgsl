@@ -51,7 +51,7 @@ fn diffuse(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let theta_p1 = wrap_direction(i32(theta_index) + 1);
 
         // Diffusion coefficient
-        let gamma = 2.0 * 0.025 * (water_wave_group_speeds.wave_group_speeds[zeta_index].x) * (settings.delta_time * TIME_MULT) * 0.5;
+        let gamma = 2.0 * 0.025 * (water_wave_group_speeds.wave_group_speeds[zeta_index].x) * (settings.delta_time) * 0.5;
 
         // Sample magnitudes from adjacent directions at current position
         let amp_m1 = sample_amplitude(x, z, theta_m1, zeta_index);

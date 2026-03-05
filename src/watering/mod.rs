@@ -147,8 +147,10 @@ pub fn setup_height_field(
 // ─── Update Systems ──────────────────────────────────────────────────────────
 
 fn tick_water_time(time: Res<Time>, mut settings: ResMut<WaterSettings>) {
-    settings.elapsed_time = time.elapsed_secs();
-    settings.delta_time = time.delta_secs();
+    // settings.elapsed_time = time.elapsed_secs();
+    settings.elapsed_time = (time.elapsed_secs()*3.0) + 100.0;
+    // settings.elapsed_time = 0.0;
+    settings.delta_time = time.delta_secs()*3.0;
 }
 
 fn debug_input_system(
@@ -198,16 +200,17 @@ fn debug_input_system(
 
 pub const GRID_X_SIZE: usize = 256;
 pub const GRID_Z_SIZE: usize = 256;
-pub const DIRECTIONS: usize = 64;
-pub const TOTAL_WAVE_NUMBERS: usize = 4;
+pub const DIRECTIONS: usize = 32;
+pub const TOTAL_WAVE_NUMBERS: usize = 1;
 pub const MIN_ZETA: f32 = -5.0;
-pub const MAX_ZETA: f32 = 3.3;
+// pub const MAX_ZETA: f32 = 3.3;
+pub const MAX_ZETA: f32 = -3.0;
 pub const WIND_SPEED: f32 = 3.0;
 const GRAVITY: f32 = 9.81;
 
-pub const RENDER_X_SIZE: usize = 2048;
-pub const RENDER_Z_SIZE: usize = 2048;
-pub const PROFILE_BUFFER_LENGTH: usize = 2048;
+pub const RENDER_X_SIZE: usize = 256;
+pub const RENDER_Z_SIZE: usize = 256;
+pub const PROFILE_BUFFER_LENGTH: usize = 512;
 
 //to be put in main world
 #[derive(Resource, ExtractResource, Clone, ShaderType)]

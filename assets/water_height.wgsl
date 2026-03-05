@@ -46,8 +46,8 @@ fn reconstruct_height(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     // Map render coordinates to grid coordinates
-    let real_x = f32(render_x) / f32(RENDER_X_SIZE) * f32(GRID_X_SIZE);
-    let real_z = f32(render_z) / f32(RENDER_Z_SIZE) * f32(GRID_Z_SIZE);
+    let real_x = (f32(render_x) / f32(RENDER_X_SIZE)) * f32(GRID_X_SIZE);
+    let real_z = (f32(render_z) / f32(RENDER_Z_SIZE)) * f32(GRID_Z_SIZE);
 
     var surface_offset = vec3<f32>(0.0, 0.0, 0.0);
 
@@ -80,8 +80,8 @@ fn reconstruct_height(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
             // Profile buffer index (wrapping)
 //            let profile_coord = ((wave_number * position_offset / TAU) + (DIRECTIONAL_OFFSETS[theta_index]/4.0)) * f32(PROFILE_BUFFER_LENGTH);
-//            let profile_coord = position_offset + (DIRECTIONAL_OFFSETS[theta_index]/1.0);
-            let profile_coord = position_offset;
+            let profile_coord = position_offset + (DIRECTIONAL_OFFSETS[theta_index]/1.0);
+//            let profile_coord = position_offset;
 //            let wrapped_index = i32((f32(PROFILE_BUFFER_LENGTH) * profile_coord / period)%f32(PROFILE_BUFFER_LENGTH));
 //            let wrapped_index = i32(modulo((profile_coord / period) * f32(PROFILE_BUFFER_LENGTH), f32(PROFILE_BUFFER_LENGTH)));
             let index = i32(
@@ -104,15 +104,15 @@ fn reconstruct_height(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // Height contribution: Re(A) * cos - Im(A) * sin
             // This properly handles the complex amplitude with phase
 
-//            surface_offset.y += (amplitude.x * cos_val.y) - (amplitude.y * sin_val.y);
+            surface_offset.y += (amplitude.x * cos_val.y) - (amplitude.y * -cos_val.x);
+
+            surface_offset.x += dir.x*((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
+            surface_offset.z += dir.z*((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
+
+//            surface_offset.y += (amplitude.x * cos_val.y);
 //
-//            surface_offset.x += dir.x*((amplitude.x * cos_val.x) - (amplitude.y * sin_val.x));
-//            surface_offset.z += dir.z*((amplitude.x * cos_val.x) - (amplitude.y * sin_val.x));
-
-            surface_offset.y += (amplitude.x * cos_val.y);
-
-            surface_offset.x += dir.x*((amplitude.x * cos_val.x));
-            surface_offset.z += dir.z*((amplitude.x * cos_val.x));
+//            surface_offset.x += dir.x*((amplitude.x * cos_val.x));
+//            surface_offset.z += dir.z*((amplitude.x * cos_val.x));
 
 //            tx.x += dir.x*((amplitude.x * cos_val.z) - (amplitude.y * sin_val.z));
 //            tx.y += dir.x*((amplitude.x * cos_val.w) - (amplitude.y * sin_val.w));

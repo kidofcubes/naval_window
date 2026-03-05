@@ -9,7 +9,7 @@
 @group(0) @binding(0) var profile_out: texture_storage_2d<rgba32float, write>;
 @group(0) @binding(1) var<uniform> settings: WaterSettings;
 
-const INTEGRATION_STEPS: u32 = 64;
+const INTEGRATION_STEPS: u32 = 1;
 const PERIODICITY: f32 = 2.0;
 fn spectrum(zeta: f32, wind_speed: f32) -> f32 {
     let A = pow(1.1, 1.5 * zeta);
@@ -61,20 +61,24 @@ fn build_profile(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var result = vec4<f32>(0.0, 0.0, 0.0, 0.0);
 
         for(var i: u32 = 0u; i < INTEGRATION_STEPS; i++){
-            let zeta = min_zeta + ((max_zeta - min_zeta) * ((f32(i) + 0.5) / f32(INTEGRATION_STEPS)));
+//            let zeta = min_zeta + ((max_zeta - min_zeta) * ((f32(i) + 0.5) / f32(INTEGRATION_STEPS)));
+            let zeta = max_zeta;
 
             let waveLength = pow(2, zeta);
             let waveNumber = TAU / waveLength;
 //            let phase1 = waveNumber * (p         ) - (dispersionRelation(waveNumber) * (settings.elapsed_time+100.0));
 //            let phase2 = waveNumber * (p - period) - (dispersionRelation(waveNumber) * (settings.elapsed_time+100.0));
-            let phase1 = (waveNumber * (p         )) - (dispersionRelation(waveNumber) * ((settings.elapsed_time * TIME_MULT)+100.0));
-            let phase2 = (waveNumber * (p - period)) - (dispersionRelation(waveNumber) * ((settings.elapsed_time * TIME_MULT)+100.0));
+            let phase1 = (waveNumber * (p         )) - (dispersionRelation(waveNumber) * ((settings.elapsed_time)));
+//            let phase2 = (waveNumber * (p - period)) - (dispersionRelation(waveNumber) * ((settings.elapsed_time)));
 
-            let weight1 = p / period;
-            let weight2 = 1 - weight1;
+//            let weight1 = p / period;
+//            let weight2 = 1 - weight1;
+//            result += dx * waveLength * spectrum(zeta, 3.0) *
+//                   (cubic_bump(weight1) * gerstner_wave(phase1, waveNumber) +
+//                    cubic_bump(weight2) * gerstner_wave(phase2, waveNumber));
+
             result += dx * waveLength * spectrum(zeta, 3.0) *
-                   (cubic_bump(weight1) * gerstner_wave(phase1, waveNumber) +
-                    cubic_bump(weight2) * gerstner_wave(phase2, waveNumber));
+                   (gerstner_wave(phase1, waveNumber));
         }
 
         textureStore(

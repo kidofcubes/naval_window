@@ -101,7 +101,7 @@ fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
 
 //    color = color + vec4<f32>(input.uv.xy, input.world_position.y/10.0, 1.0);
     color = color + vec4<f32>(vec3<f32>(input.world_position.y/5.0), 1.0);
-//    color = color + vec4<f32>(input.uv.xy-0.5, 0.0, 1.0);
+    color = color + vec4<f32>(input.uv.xy-0.5, 0.0, 1.0);
 
     return color;
 //    return vec4<f32>(input.world_position.xz, f32(center), 1.0);
