@@ -1,17 +1,17 @@
 //#define_import_path water_common
 
 // Grid dimensions
-const GRID_X_SIZE: u32 = 1024u;
-const GRID_Z_SIZE: u32 = 1024u;
-const RENDER_X_SIZE: u32 = 1024u;
-const RENDER_Z_SIZE: u32 = 1024u;
+const GRID_X_SIZE: u32 = 256u;
+const GRID_Z_SIZE: u32 = 256u;
+const RENDER_X_SIZE: u32 = 2048u;
+const RENDER_Z_SIZE: u32 = 2048u;
 const DIRECTIONS: u32 = 64u;
-const TOTAL_ZETA_NUMBERS: u32 = 1u;
+const TOTAL_ZETA_NUMBERS: u32 = 4u;
 const PROFILE_BUFFER_LENGTH: u32 = 2048u;
 
 // Wave parameters
-const ZETA_MIN: f32 = 1.0;
-const ZETA_MAX: f32 = 2.0;
+const ZETA_MIN: f32 = -5;
+const ZETA_MAX: f32 = 3.3;
 //const WAVE_NUMBERS = array<f32, 1>(1.0);
 const DIRECTIONAL_OFFSETS = array<f32, 64>(
     4.00209964, 0.62348099, 0.61843034, 6.26698587,
@@ -75,3 +75,11 @@ fn index_to_radians(i: u32) -> f32 {
 fn layer_index(theta_index: u32, zeta_index: u32) -> i32 {
     return i32(zeta_index * DIRECTIONS + theta_index);
 }
+//
+//fn wrap_modulo(x: f32, n: f32){
+//    return x - floor(x / n) * n;
+//}
+//
+//fn wrap_modulo(x: i32, n: i32){
+//    return x - i32(floor(f32(x) / f32(n))) * n;
+//}

@@ -8,6 +8,7 @@ pub fn compute_group_speeds(min_zeta: f32, max_zeta: f32, wind_speed: f32, zeta_
         let max_zeta = min_zeta + (d_zeta * (i as f32 + 0.5));
         return compute_group_speed(min_zeta, max_zeta, wind_speed);
     }).collect::<Vec<_>>();
+    println!("GROUP SPEEDS ARE {:?}", group_speeds);
     return group_speeds;
 }
 
