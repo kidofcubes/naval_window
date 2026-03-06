@@ -1,5 +1,6 @@
 mod compute_shader;
 mod pre_compute;
+mod cpu_debug_impl;
 
 use std::f32::consts::TAU;
 use std::time::Instant;
@@ -46,7 +47,7 @@ impl Plugin for Watering{
                 0: None
             })
             .insert_resource(WaterWaveGroupSpeeds {
-                wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_WAVE_NUMBERS).iter().map(|x| vec4(*x,0.0,0.0,0.0)).collect::<Vec<_>>().try_into().unwrap()
+                wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_ZETA_NUMBERS).iter().map(|x| vec4(*x, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap()
             })
             .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
             .add_plugins(ExtractResourcePlugin::<HeightFieldHandle>::default())
@@ -200,16 +201,16 @@ fn debug_input_system(
 
 pub const GRID_X_SIZE: usize = 256;
 pub const GRID_Z_SIZE: usize = 256;
-pub const DIRECTIONS: usize = 32;
-pub const TOTAL_WAVE_NUMBERS: usize = 1;
+pub const DIRECTIONS: usize = 64;
+pub const TOTAL_ZETA_NUMBERS: usize = 4;
 pub const MIN_ZETA: f32 = -5.0;
-// pub const MAX_ZETA: f32 = 3.3;
-pub const MAX_ZETA: f32 = -3.0;
+pub const MAX_ZETA: f32 = 3.3;
+// pub const MAX_ZETA: f32 = -3.0;
 pub const WIND_SPEED: f32 = 3.0;
 const GRAVITY: f32 = 9.81;
 
-pub const RENDER_X_SIZE: usize = 256;
-pub const RENDER_Z_SIZE: usize = 256;
+pub const RENDER_X_SIZE: usize = 2048;
+pub const RENDER_Z_SIZE: usize = 2048;
 pub const PROFILE_BUFFER_LENGTH: usize = 512;
 
 //to be put in main world
@@ -255,7 +256,7 @@ pub struct VoxelSettings {
 
 #[derive(Resource, ExtractResource, Clone, ShaderType)]
 pub struct WaterWaveGroupSpeeds{
-    pub wave_group_speeds: [Vec4; TOTAL_WAVE_NUMBERS],
+    pub wave_group_speeds: [Vec4; TOTAL_ZETA_NUMBERS],
 }
 
 impl Default for VoxelSettings {

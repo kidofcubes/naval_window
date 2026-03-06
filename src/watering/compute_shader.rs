@@ -7,7 +7,7 @@ use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, te
 use bevy::render::render_resource::Sampler;
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
-use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_WAVE_NUMBERS};
+use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_ZETA_NUMBERS};
 // use bevy::render::render_resource::encase::matrix::MatrixScalar;
 // use bevy::render::render_resource::encase::matrix::AsMutMatrixParts;
 
@@ -176,7 +176,7 @@ pub fn prepare_gpu_resources(
             width:                 GRID_X_SIZE as u32,
             height:                GRID_Z_SIZE as u32,
             // indexed by (k*DIRECTIONS)+direction
-            depth_or_array_layers: (DIRECTIONS * TOTAL_WAVE_NUMBERS) as u32,
+            depth_or_array_layers: (DIRECTIONS * TOTAL_ZETA_NUMBERS) as u32,
         },
         mip_level_count:     1,
         sample_count:        1,
@@ -208,7 +208,7 @@ pub fn prepare_gpu_resources(
     // ── Profile buffer ─────────────────────────────────────────────────────
     let profile_buf = render_device.create_texture(&TextureDescriptor {
         label:               Some("profile_buf"),
-        size:                Extent3d { width: PROFILE_BUFFER_LENGTH as u32, height: TOTAL_WAVE_NUMBERS as u32, depth_or_array_layers: 1 },
+        size:                Extent3d { width: PROFILE_BUFFER_LENGTH as u32, height: TOTAL_ZETA_NUMBERS as u32, depth_or_array_layers: 1 },
         mip_level_count:     1,
         sample_count:        1,
         dimension:           TextureDimension::D2,

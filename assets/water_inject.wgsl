@@ -18,8 +18,8 @@
 fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let x = global_id.x;
     let z = global_id.y;
-//    let theta_index = global_id.z;
-    let theta_index: u32 = 0;
+    let theta_index = global_id.z;
+//    let theta_index: u32 = 0;
 
     // Bounds check
     if (x >= GRID_X_SIZE || z >= GRID_Z_SIZE || theta_index >= DIRECTIONS) {
@@ -48,12 +48,18 @@ fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let max_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 1.0) / f32(TOTAL_ZETA_NUMBERS)));
 
 
-//        let zeta = min_zeta + ((max_zeta - min_zeta) * ((f32(0.0) + 0.5) / f32(1.0)));
-        let zeta = max_zeta; //works if both is max_zeta
+        let zeta = min_zeta + ((max_zeta - min_zeta) * ((f32(0.0) + 0.5) / f32(1.0)));
+//        let zeta = max_zeta; //works if both is max_zeta
 //        let period: f32 = f32(2.0) * pow(2,max_zeta);
 
-        let waveLength = pow(2, zeta);
-        let wave_number = TAU / waveLength;
+        let waveLength0 = pow(2, min_zeta);
+        let wave_number0 = TAU / waveLength0;
+
+        let waveLength1 = pow(2, zeta);
+        let wave_number1 = TAU / waveLength1;
+
+        let waveLength2 = pow(2, max_zeta);
+        let wave_number2 = TAU / waveLength2;
 //        let wave_number = TAU / waveLength2;
 //        let wave_number = WAVE_NUMBERS[zeta_index];
 //        let angular_frequency = sqrt(GRAVITY * wave_number);
@@ -63,8 +69,16 @@ fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 
 
-        let spatial_phase = (wave_number * ((position_offset+(settings.elapsed_time*0.00)) + (DIRECTIONAL_OFFSETS[theta_index]/1.0)))
-                         - (sqrt(GRAVITY * wave_number) * ((settings.elapsed_time)));
+        let spatial_phase =
+//                           (wave_number2 * ((position_offset+(settings.elapsed_time*0.0)) + (DIRECTIONAL_OFFSETS[theta_index]/1.0)))
+                           (wave_number2 * ((position_offset+(settings.elapsed_time*0.0)) + (DIRECTIONAL_OFFSETS[theta_index]/1.0)))
+//                         - (wave_number2 * ((position_offset+(settings.elapsed_time*0.0)) + (DIRECTIONAL_OFFSETS[theta_index]/1.0)))
+                         - (sqrt(GRAVITY * wave_number2) * ((settings.elapsed_time)))
+//                         - (sqrt(GRAVITY * wave_number2) * ((settings.elapsed_time)))
+//                         - (sqrt(GRAVITY * wave_number2) * sqrt((settings.elapsed_time)))
+//                         - (sqrt(GRAVITY * wave_number2) * ((settings.elapsed_time)))
+
+                         ;
 
 
         let phase_coordinate = spatial_phase;
@@ -77,7 +91,7 @@ fn inject_amplitude(@builtin(global_invocation_id) global_id: vec3<u32>) {
         );
 
         let layer = layer_index(theta_index, zeta_index);
-        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(amplitude, 0.0, 1.0));
-//        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(debug_settings.scale, 0.0, 0.0, 1.0));
+//        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(amplitude, 0.0, 1.0));
+        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(debug_settings.scale, 0.0, 0.0, 1.0));
     }
 }
