@@ -16,6 +16,7 @@ use bevy::render::render_resource::{Extent3d, ShaderType, TextureDescriptor, Tex
 use crate::BuildData;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::render::render_graph::RenderGraphExt;
+use crate::watering::cpu_debug_impl::CpuDebugWatering;
 use crate::watering::pre_compute::compute_group_speeds;
 
 pub struct Watering;
@@ -49,45 +50,51 @@ impl Plugin for Watering{
             .insert_resource(WaterWaveGroupSpeeds {
                 wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_ZETA_NUMBERS).iter().map(|x| vec4(*x, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap()
             })
-            .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
-            .add_plugins(ExtractResourcePlugin::<HeightFieldHandle>::default())
-            .add_plugins(ExtractResourcePlugin::<WaterDebugSettings>::default())
-            .add_plugins(ExtractResourcePlugin::<VoxelSettings>::default())
-            .add_plugins(ExtractResourcePlugin::<VoxelGridHandle>::default())
-            .add_plugins(ExtractResourcePlugin::<WaterWaveGroupSpeeds>::default())
             .insert_resource(VoxelSettings::default())
-            .add_systems(Startup, (setup_height_field, setup_voxel_fallback))
+            .add_systems(Startup, (setup_height_field))
             .add_systems(Update, debug_input_system)
             .add_systems(Update, (tick_water_time, sync_voxel_grid))
         // Advance simulation time each frame
         // .add_systems(Update, (tick_water_time, sync_ship_position))
         ;
 
-        let render_app = app.sub_app_mut(RenderApp);
-        render_app
-            // .init_resource::<WaterSettings>()
-            .add_systems(
-                Render,
-                (
-                    compute_shader::prepare_gpu_resources
-                        .in_set(RenderSystems::PrepareResources),
-                    // pipeline::upload_obstacle_mask
-                    //     .in_set(RenderSystems::PrepareResources)
-                    //     .after(resources::prepare_gpu_resources),
-                    compute_shader::queue_bind_groups
-                        .in_set(RenderSystems::Queue),
-                ),
-            );
+        if(false) {
+            app
+                .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
+                .add_plugins(ExtractResourcePlugin::<HeightFieldHandle>::default())
+                .add_plugins(ExtractResourcePlugin::<WaterDebugSettings>::default())
+                .add_plugins(ExtractResourcePlugin::<VoxelSettings>::default())
+                .add_plugins(ExtractResourcePlugin::<VoxelGridHandle>::default())
+                .add_plugins(ExtractResourcePlugin::<WaterWaveGroupSpeeds>::default())
+            ;
+            let render_app = app.sub_app_mut(RenderApp);
+            render_app
+                // .init_resource::<WaterSettings>()
+                .add_systems(
+                    Render,
+                    (
+                        compute_shader::prepare_gpu_resources
+                            .in_set(RenderSystems::PrepareResources),
+                        // pipeline::upload_obstacle_mask
+                        //     .in_set(RenderSystems::PrepareResources)
+                        //     .after(resources::prepare_gpu_resources),
+                        compute_shader::queue_bind_groups
+                            .in_set(RenderSystems::Queue),
+                    ),
+                );
 
-        // use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
-        // use bevy::render::render_graph::RenderGraphApp;
-        render_app
-            .add_render_graph_node::<compute_shader::WaterSimulationNode>(
-                Core3d,
-                compute_shader::WaterNodeLabel,
-            )
-            // Run our compute passes before the main 3D pass
-            .add_render_graph_edge(Core3d, compute_shader::WaterNodeLabel, Node3d::EarlyPrepass);
+            // use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
+            // use bevy::render::render_graph::RenderGraphApp;
+            render_app
+                .add_render_graph_node::<compute_shader::WaterSimulationNode>(
+                    Core3d,
+                    compute_shader::WaterNodeLabel,
+                )
+                // Run our compute passes before the main 3D pass
+                .add_render_graph_edge(Core3d, compute_shader::WaterNodeLabel, Node3d::EarlyPrepass);
+        }else{
+            app.add_plugins(CpuDebugWatering);
+        }
     }
 
     fn finish(&self, app: &mut App) {
@@ -199,19 +206,19 @@ fn debug_input_system(
 }
 
 
-pub const GRID_X_SIZE: usize = 256;
-pub const GRID_Z_SIZE: usize = 256;
-pub const DIRECTIONS: usize = 64;
-pub const TOTAL_ZETA_NUMBERS: usize = 4;
+pub const GRID_X_SIZE: usize = 64;
+pub const GRID_Z_SIZE: usize = 64;
+pub const DIRECTIONS: usize = 4;
+pub const TOTAL_ZETA_NUMBERS: usize = 1;
 pub const MIN_ZETA: f32 = -5.0;
 pub const MAX_ZETA: f32 = 3.3;
 // pub const MAX_ZETA: f32 = -3.0;
 pub const WIND_SPEED: f32 = 3.0;
 const GRAVITY: f32 = 9.81;
 
-pub const RENDER_X_SIZE: usize = 2048;
-pub const RENDER_Z_SIZE: usize = 2048;
-pub const PROFILE_BUFFER_LENGTH: usize = 512;
+pub const RENDER_X_SIZE: usize = 64;
+pub const RENDER_Z_SIZE: usize = 64;
+pub const PROFILE_BUFFER_LENGTH: usize = 128;
 
 //to be put in main world
 #[derive(Resource, ExtractResource, Clone, ShaderType)]
