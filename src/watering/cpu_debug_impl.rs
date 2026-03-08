@@ -1,7 +1,7 @@
 //! CPU implementations of water simulation compute shaders for debugging purposes.
 //! These mirror the GPU shader logic for validation and debugging.
 
-use std::f32::consts::TAU;
+use std::f32::consts::*;
 use bevy::app::hotpatch::call;
 use bevy::prelude::*;
 use super::{
@@ -12,74 +12,75 @@ use super::{
 };
 
 /// Directional offsets for phase coherence (matches water_common.wgsl)
-const DIRECTIONAL_OFFSETS: [f32; 64] = [
-    0.0,
-    0.09817477042468103,
-    0.19634954084936207,
-    0.2945243112740431,
-    0.39269908169872414,
-    0.4908738521234052,
-    0.5890486225480862,
-    0.6872233929727672,
-    0.7853981633974483,
-    0.8835729338221293,
-    0.9817477042468103,
-    1.0799224746714913,
-    1.1780972450961724,
-    1.2762720155208536,
-    1.3744467859455345,
-    1.4726215563702154,
-    1.5707963267948966,
-    1.6689710972195777,
-    1.7671458676442586,
-    1.8653206380689396,
-    1.9634954084936207,
-    2.061670178918302,
-    2.1598449493429825,
-    2.2580197197676637,
-    2.356194490192345,
-    2.454369260617026,
-    2.552544031041707,
-    2.650718801466388,
-    2.748893571891069,
-    2.84706834231575,
-    2.945243112740431,
-    3.043417883165112,
-    3.141592653589793,
-    3.2397674240144743,
-    3.3379421944391554,
-    3.436116964863836,
-    3.5342917352885173,
-    3.6324665057131984,
-    3.730641276137879,
-    3.8288160465625602,
-    3.9269908169872414,
-    4.025165587411922,
-    4.123340357836604,
-    4.221515128261284,
-    4.319689898685965,
-    4.417864669110647,
-    4.516039439535327,
-    4.614214209960009,
-    4.71238898038469,
-    4.81056375080937,
-    4.908738521234052,
-    5.006913291658733,
-    5.105088062083414,
-    5.203262832508095,
-    5.301437602932776,
-    5.399612373357457,
-    5.497787143782138,
-    5.595961914206819,
-    5.6941366846315,
-    5.792311455056181,
-    5.890486225480862,
-    5.988660995905543,
-    6.086835766330224,
-    6.1850105367549055
-];
+// const DIRECTIONAL_OFFSETS: [f32; 64] = [
+//     0.0,
+//     0.09817477042468103,
+//     0.19634954084936207,
+//     0.2945243112740431,
+//     0.39269908169872414,
+//     0.4908738521234052,
+//     0.5890486225480862,
+//     0.6872233929727672,
+//     0.7853981633974483,
+//     0.8835729338221293,
+//     0.9817477042468103,
+//     1.0799224746714913,
+//     1.1780972450961724,
+//     1.2762720155208536,
+//     1.3744467859455345,
+//     1.4726215563702154,
+//     1.5707963267948966,
+//     1.6689710972195777,
+//     1.7671458676442586,
+//     1.8653206380689396,
+//     1.9634954084936207,
+//     2.061670178918302,
+//     2.1598449493429825,
+//     2.2580197197676637,
+//     2.356194490192345,
+//     2.454369260617026,
+//     2.552544031041707,
+//     2.650718801466388,
+//     2.748893571891069,
+//     2.84706834231575,
+//     2.945243112740431,
+//     3.043417883165112,
+//     3.141592653589793,
+//     3.2397674240144743,
+//     3.3379421944391554,
+//     3.436116964863836,
+//     3.5342917352885173,
+//     3.6324665057131984,
+//     3.730641276137879,
+//     3.8288160465625602,
+//     3.9269908169872414,
+//     4.025165587411922,
+//     4.123340357836604,
+//     4.221515128261284,
+//     4.319689898685965,
+//     4.417864669110647,
+//     4.516039439535327,
+//     4.614214209960009,
+//     4.71238898038469,
+//     4.81056375080937,
+//     4.908738521234052,
+//     5.006913291658733,
+//     5.105088062083414,
+//     5.203262832508095,
+//     5.301437602932776,
+//     5.399612373357457,
+//     5.497787143782138,
+//     5.595961914206819,
+//     5.6941366846315,
+//     5.792311455056181,
+//     5.890486225480862,
+//     5.988660995905543,
+//     6.086835766330224,
+//     6.1850105367549055
+// ];
+const DIRECTIONAL_OFFSETS: [f32; 64] = [0.0; 64];
 
-const INTEGRATION_STEPS: usize = 1;
+const INTEGRATION_STEPS: usize = 64;
 const PERIODICITY: f32 = 2.0;
 
 /// Convert direction index to radians
@@ -125,7 +126,7 @@ impl Plugin for CpuDebugWatering {
 fn update(
     mut cpu_debug_watering_resources: ResMut<CpuDebugWateringResources>,
     mut water_debug_settings: ResMut<WaterDebugSettings>,
-    water_settings: Res<WaterSettings>,
+    mut water_settings: ResMut<WaterSettings>,
     mut gizmos: Gizmos,
     time: Res<Time>,
     key: Res<ButtonInput<KeyCode>>,
@@ -134,8 +135,12 @@ fn update(
         water_debug_settings.inject = 1.0;
         let cpu_debug_watering_resources = cpu_debug_watering_resources.as_mut();
 
-        let elapsed_time = (time.elapsed_secs() * 3.0) + 100.0;
         let delta_time = time.delta_secs() * 3.0;
+        // water_settings.elapsed_time = 100.0;
+        water_settings.elapsed_time = (water_debug_settings.spawn_center_z * 0.01) + 100.0;
+        // water_settings.elapsed_time = (time.elapsed_secs() * 3.0) + 100.0;
+        // water_settings.elapsed_time = 0.0;
+
         call(|| inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &water_settings, &water_debug_settings));
         call(|| build_profile(&mut cpu_debug_watering_resources.profile_buffer, &water_settings));
         call(|| reconstruct_height(&cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &mut cpu_debug_watering_resources.height_buffer, &mut cpu_debug_watering_resources.normal_buffer, &water_settings));
@@ -165,7 +170,9 @@ fn update(
             );
             gizmos.line(
                 pos,
+                // pos + vec3(0.1, 0.0, 0.0),
                 pos + vec3(num.y, 0.0, 0.0),
+                // pos + vec3(0.1, cpu_debug_watering_resources.profile_buffer[zeta_index][(i+(((6*PROFILE_BUFFER_LENGTH)/4)))%PROFILE_BUFFER_LENGTH].x, 0.0),
                 Color::srgba(1.0, 0.0, (i as f32 / PROFILE_BUFFER_LENGTH as f32), 1.0),
             );
         }
@@ -230,13 +237,13 @@ pub fn inject_amplitude(
             for theta_index in 0..DIRECTIONS {
                 let theta_index = 0;
                 let theta = index_to_radians(theta_index);
-                let dir_x = theta.cos();
-                let dir_z = theta.sin();
+                let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
 
                 for zeta_index in 0..TOTAL_ZETA_NUMBERS {
                     let min_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) - 0.0) / (TOTAL_ZETA_NUMBERS as f32)));
                     let max_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) + 1.0) / (TOTAL_ZETA_NUMBERS as f32)));
                     let zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.5) / TOTAL_ZETA_NUMBERS as f32));
+                    let period = PERIODICITY * 2.0f32.powf(max_zeta);
 
                     let wave_length0 = 2.0f32.powf(min_zeta);
                     let wave_number0 = TAU / wave_length0;
@@ -248,11 +255,19 @@ pub fn inject_amplitude(
                     let wave_number2 = TAU / wave_length2;
 
                     // Position offset along wave direction
-                    let position_offset = pos_x * dir_x + pos_z * dir_z;
+                    let position_offset = vec2(pos_x,pos_z).dot(vec2(dir.x,dir.z));
+
+                    // profile coord from height reconstruction
+                    let profile_coord = (position_offset + DIRECTIONAL_OFFSETS[theta_index]);
+                    // index used by height reconstruction
+                    let index = modulo(
+                        PROFILE_BUFFER_LENGTH as f32 * (profile_coord / period),
+                        PROFILE_BUFFER_LENGTH as f32,
+                    ) as usize;
 
                     let spatial_phase =
                         (wave_number1 * (position_offset + DIRECTIONAL_OFFSETS[theta_index]))
-                        - ((GRAVITY * wave_number1).sqrt() * water_settings.elapsed_time);
+                        - (dispersion_relation(wave_number1) * water_settings.elapsed_time);
                     let phase_coordinate = spatial_phase;
 
                     // Create amplitude with correct phase
@@ -261,10 +276,8 @@ pub fn inject_amplitude(
 
                     let amplitude = vec2(
                         f32::cos(-phase_coordinate),
-                        f32::sin(-phase_coordinate)
+                        f32::cos((-phase_coordinate) + (0.0))
                     );
-
-                    let layer = layer_index(theta_index, zeta_index);
 
                     amplitude_out[layer][z][x] = amplitude;
                     // amplitude_out[layer][z][x] = vec2(debug_settings.scale, 0.0);
@@ -293,7 +306,7 @@ fn spectrum(zeta: f32, wind_speed: f32) -> f32 {
     0.139098 * (a * b).sqrt()
 }
 
-/// Dispersion relation: omega = sqrt(g * k)
+/// Dispersion relation (angular rotation): omega = sqrt(g * k)
 #[inline]
 fn dispersion_relation(k: f32) -> f32 {
     (GRAVITY * k).sqrt()
@@ -331,42 +344,52 @@ pub fn build_profile(profile_out: &mut ProfileBuffer, settings: &WaterSettings) 
             MIN_ZETA + (zeta_full_range * (zeta_index as f32 / TOTAL_ZETA_NUMBERS as f32));
         let max_zeta =
             MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 1.0) / TOTAL_ZETA_NUMBERS as f32));
-        let period = PERIODICITY * 2.0f32.powf(max_zeta);
 
         let dx = (max_zeta - min_zeta) / INTEGRATION_STEPS as f32;
 
         for profile_index in 0..PROFILE_BUFFER_LENGTH {
-            let p = (profile_index as f32 * period) / PROFILE_BUFFER_LENGTH as f32;
-
             let mut result = Vec4::ZERO;
 
             for i in 0..INTEGRATION_STEPS {
                 let zeta =
                     min_zeta + ((max_zeta - min_zeta) * ((i as f32 + 0.5) / INTEGRATION_STEPS as f32));
+                // let zeta = max_zeta;
+
+
+                let period = PERIODICITY * 2.0f32.powf(max_zeta);
+                let p = (profile_index as f32 * period) / PROFILE_BUFFER_LENGTH as f32;
+
 
                 let wave_length = 2.0f32.powf(zeta);
                 let wave_number = TAU / wave_length;
 
-                let phase1 = (wave_number * p) - (dispersion_relation(wave_number) * settings.elapsed_time);
-                let phase2 =
-                    (wave_number * (p - period)) - (dispersion_relation(wave_number) * settings.elapsed_time);
+                let phase1 = (wave_number * (p         )) - (dispersion_relation(wave_number) * settings.elapsed_time);
+                let phase2 = (wave_number * (p - period)) - (dispersion_relation(wave_number) * settings.elapsed_time);
 
                 let weight1 = p / period;
                 let weight2 = 1.0 - weight1;
 
-                let gerstner1 = gerstner_wave(phase1, wave_number);
-                let gerstner2 = gerstner_wave(phase2, wave_number);
 
-                let spec = dx * wave_length * spectrum(zeta, wind_speed) * 1.0;
+                result += wave_length * spectrum(zeta, wind_speed) * (
+                      (cubic_bump(weight1) * gerstner_wave(phase1, wave_number))
+                    + (cubic_bump(weight2) * gerstner_wave(phase2, wave_number))
+                );
 
-                result += spec
-                    * (cubic_bump(weight1) * gerstner1 + cubic_bump(weight2) * gerstner2);
+                // result += wave_length * spectrum(zeta, wind_speed) * (
+                //     (gerstner_wave(phase1, wave_number))
+                //         + (gerstner_wave(phase2, wave_number))
+                // );
 
-                // for j in 0..4 {
-                //     result[j] += spec
-                //         * (cubic_bump(weight1) * gerstner1[j] + cubic_bump(weight2) * gerstner2[j]);
-                // }
+                // result += wave_length * spectrum(zeta, wind_speed) * (
+                //     gerstner_wave(phase1, wave_number)
+                // );
+
+                // result += spec * (
+                //     (cubic_bump(weight1) * gerstner1)
+                //     + (cubic_bump(weight2) * gerstner2)
+                // );
             }
+            result *= dx;
 
             profile_out[zeta_index][profile_index] = result;
         }
@@ -449,25 +472,24 @@ pub fn reconstruct_height(
             let real_x = (render_x as f32 / RENDER_X_SIZE as f32) * GRID_X_SIZE as f32;
             let real_z = (render_z as f32 / RENDER_Z_SIZE as f32) * GRID_Z_SIZE as f32;
 
-            let mut surface_offset = [0.0f32; 3];
-            let tx = [0.0f32; 3];
-            let tz = [0.0f32; 3];
+            let mut surface_offset = Vec3::ZERO;
+            // let tx = [0.0f32; 3];
+            // let tz = [0.0f32; 3];
 
             for zeta_index in 0..TOTAL_ZETA_NUMBERS {
                 let max_zeta = MIN_ZETA
                     + (zeta_full_range * ((zeta_index as f32 + 1.0) / TOTAL_ZETA_NUMBERS as f32));
-                let period = 2.0 * 2.0f32.powf(max_zeta);
+                let period = PERIODICITY * 2.0f32.powf(max_zeta);
 
                 for theta_index in 0..DIRECTIONS {
                     let theta = index_to_radians(theta_index);
-                    let dir_x = theta.cos();
-                    let dir_z = theta.sin();
+                    let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
 
                     // Sample amplitude at this position and direction
                     let amplitude = sample_amplitude(amplitude_in, real_x, real_z, theta_index, zeta_index);
 
                     // Position offset along wave direction
-                    let position_offset = real_x * dir_x + real_z * dir_z;
+                    let position_offset = vec2(real_x,real_z).dot(vec2(dir.x,dir.z));
 
                     // Profile buffer index (wrapping)
                     let profile_coord = position_offset + DIRECTIONAL_OFFSETS[theta_index];
@@ -475,32 +497,30 @@ pub fn reconstruct_height(
                         PROFILE_BUFFER_LENGTH as f32 * (profile_coord / period),
                         PROFILE_BUFFER_LENGTH as f32,
                     ) as usize;
-                    let index = index.min(PROFILE_BUFFER_LENGTH - 1);
+                    // let index = index.min(PROFILE_BUFFER_LENGTH - 1);
 
                     // Load profile values (scaled by direction multiplier)
                     let cos_val = profile_in[zeta_index][index] * direction_multiplier;
 
                     // Height contribution: Re(A) * cos - Im(A) * sin
-                    surface_offset[1] += (amplitude.x * cos_val.y) - (amplitude[1] * -cos_val[0]);
+                    surface_offset.y += (amplitude.x * cos_val.y) - (amplitude.y * -cos_val.x);
 
-                    surface_offset[0] +=
-                        dir_x * ((amplitude[0] * cos_val[0]) - (amplitude[1] * cos_val[1]));
-                    surface_offset[2] +=
-                        dir_z * ((amplitude[0] * cos_val[0]) - (amplitude[1] * cos_val[1]));
+                    surface_offset.x += dir.x * ((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
+                    surface_offset.z += dir.y * ((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
                 }
             }
 
             // Compute normal from tangent vectors
-            let normal = cross(&tx, &tz);
-            let normal_len = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-            let normal = if normal_len > 0.0 {
-                [normal[0] / normal_len, normal[1] / normal_len, normal[2] / normal_len]
-            } else {
-                [0.0, 1.0, 0.0]
-            };
+            // let normal = cross(&tx, &tz);
+            // let normal_len = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+            // let normal = if normal_len > 0.0 {
+            //     [normal[0] / normal_len, normal[1] / normal_len, normal[2] / normal_len]
+            // } else {
+            //     [0.0, 1.0, 0.0]
+            // };
 
             height_out[render_z][render_x] = [surface_offset[0], surface_offset[1], surface_offset[2], 1.0];
-            normal_out[render_z][render_x] = [normal[0], normal[1], normal[2], 1.0];
+            // normal_out[render_z][render_x] = [normal[0], normal[1], normal[2], 1.0];
         }
     }
 }

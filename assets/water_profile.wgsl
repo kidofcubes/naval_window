@@ -1,7 +1,7 @@
 #import "water_common.wgsl"::{
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
-    ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
+    PERIODICITY, ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
     GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
     index_to_radians, layer_index
 }
@@ -10,7 +10,6 @@
 @group(0) @binding(1) var<uniform> settings: WaterSettings;
 
 const INTEGRATION_STEPS: u32 = 64;
-const PERIODICITY: f32 = 2.0;
 fn spectrum(zeta: f32, wind_speed: f32) -> f32 {
     let A = pow(1.1, 1.5 * zeta);
     let B = exp(-1.8038897788076411 * pow(4.0, zeta) / pow(wind_speed, 4.0));

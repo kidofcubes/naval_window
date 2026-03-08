@@ -5,7 +5,7 @@
 #import "water_common.wgsl"::{
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
-    ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
+    PERIODICITY, ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
     GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
     index_to_radians, layer_index
 }
@@ -65,7 +65,7 @@ fn reconstruct_height(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         let min_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) - 0.0) / f32(TOTAL_ZETA_NUMBERS)));
         let max_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 1.0) / f32(TOTAL_ZETA_NUMBERS)));
-        let period: f32 = f32(2.0) * pow(2,max_zeta);
+        let period: f32 = f32(PERIODICITY) * pow(2,max_zeta);
 
         for (var theta_index: u32 = 0u; theta_index < DIRECTIONS; theta_index++) {
             let theta = index_to_radians(theta_index);
@@ -76,7 +76,7 @@ fn reconstruct_height(@builtin(global_invocation_id) global_id: vec3<u32>) {
             amplitude_sum += amplitude;
 
             // Position offset along wave direction
-            let position_offset = dot(vec2<f32>(real_x, real_z), vec2<f32>(dir.x, dir.z));
+            let position_offset = dot(vec2<f32>(real_x, real_z), vec2<f32>(dir.x, dir.z)) * 2.0;
 
             // Profile buffer index (wrapping)
 //            let profile_coord = ((wave_number * position_offset / TAU) + (DIRECTIONAL_OFFSETS[theta_index]/4.0)) * f32(PROFILE_BUFFER_LENGTH);

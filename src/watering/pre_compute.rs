@@ -4,8 +4,8 @@ use bevy::prelude::*;
 pub fn compute_group_speeds(min_zeta: f32, max_zeta: f32, wind_speed: f32, zeta_count: usize) -> Vec<f32> {
     let d_zeta = (max_zeta - min_zeta) / (zeta_count as f32);
     let group_speeds = (0..zeta_count).map(|i| {
-        let min_zeta = min_zeta + (d_zeta * (i as f32 - 0.5));
-        let max_zeta = min_zeta + (d_zeta * (i as f32 + 0.5));
+        let min_zeta = min_zeta + (d_zeta * (i as f32 - 0.0));
+        let max_zeta = min_zeta + (d_zeta * (i as f32 + 1.0));
         return compute_group_speed(min_zeta, max_zeta, wind_speed);
     }).collect::<Vec<_>>();
     println!("GROUP SPEEDS ARE {:?}", group_speeds);
