@@ -12,17 +12,18 @@
 
 @group(0) @binding(0) var amplitude_in: texture_2d_array<f32>;
 @group(0) @binding(1) var amplitude_sampler: sampler;
-@group(0) @binding(2) var amplitude_out: texture_storage_2d_array<rg32float, write>;
+@group(0) @binding(2) var amplitude_out: texture_storage_2d_array<r32float, write>;
 @group(0) @binding(3) var<uniform> settings: WaterSettings;
 @group(0) @binding(4) var voxel_texture: texture_3d<u32>;
 @group(0) @binding(5) var<uniform> voxel_settings: VoxelSettings;
 @group(0) @binding(6) var<uniform> water_wave_group_speeds: WaterWaveGroupSpeeds;
 
 // Hardware bilinear sampling using sampler
-fn sample_amplitude(x: f32, z: f32, theta_index: u32, wave_index: u32) -> vec2<f32> {
+fn sample_amplitude(x: f32, z: f32, theta_index: u32, wave_index: u32) -> f32 {
     // Boundary check - return zero outside valid range
     if (x < 1.0 || x >= f32(GRID_X_SIZE - 1u) || z < 1.0 || z >= f32(GRID_Z_SIZE - 1u)) {
-        return vec2<f32>(0.0, 0.0);
+//        return vec2<f32>(0.0, 0.0);
+        return 0.0;
     }
 
     // Convert to normalized UV coordinates (0-1)
@@ -30,7 +31,7 @@ fn sample_amplitude(x: f32, z: f32, theta_index: u32, wave_index: u32) -> vec2<f
     let uv = vec2<f32>((f32(x) + 0.5) / f32(GRID_X_SIZE), (z + 0.5) / f32(GRID_Z_SIZE));
     let layer = layer_index(theta_index, wave_index);
 
-    return textureSampleLevel(amplitude_in, amplitude_sampler, uv, layer, 0.0).xy;
+    return textureSampleLevel(amplitude_in, amplitude_sampler, uv, layer, 0.0).x;
 }
 
 // Transform water grid coordinates to world space
@@ -88,7 +89,7 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         // Check if previous position is at a boundary
 //        let world_pos = ;
-        var new_amplitude: vec2<f32>;
+        var new_amplitude: f32;
 
 //        if (is_boundary(grid_to_voxel(f32(x), f32(z)))) {
 //            new_amplitude = vec2<f32>(0.0,0.0);
@@ -126,6 +127,6 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
 
         // Write to output
-        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 1.0));
+        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 0.0, 1.0));
     }
 }

@@ -18,13 +18,13 @@
 @group(0) @binding(5) var<uniform> settings: WaterSettings;
 
 // Hardware bilinear sample from amplitude texture array
-fn sample_amplitude(x: f32, z: f32, theta_index: u32, zeta_index: u32) -> vec2<f32> {
+fn sample_amplitude(x: f32, z: f32, theta_index: u32, zeta_index: u32) -> f32 {
     // Convert to normalized UV coordinates (0-1)
     // Add 0.5 to sample at texel centers
     let uv = vec2<f32>((x + 0.5) / f32(GRID_X_SIZE), (z + 0.5) / f32(GRID_Z_SIZE));
     let layer = layer_index(theta_index, zeta_index);
 
-    return textureSampleLevel(amplitude_in, amplitude_sampler, uv, layer, 0.0).xy;
+    return textureSampleLevel(amplitude_in, amplitude_sampler, uv, layer, 0.0).x;
 }
 
 
@@ -104,10 +104,16 @@ fn reconstruct_height(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // Height contribution: Re(A) * cos - Im(A) * sin
             // This properly handles the complex amplitude with phase
 
-            surface_offset.y += (amplitude.x * cos_val.y) - (amplitude.y * -cos_val.x);
 
-            surface_offset.x += dir.x*((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
-            surface_offset.z += dir.z*((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
+            surface_offset.y += (amplitude * cos_val.y);
+
+            surface_offset.x += dir.x*((amplitude * cos_val.x));
+            surface_offset.z += dir.z*((amplitude * cos_val.x));
+
+//            surface_offset.y += (amplitude.x * cos_val.y) - (amplitude.y * -cos_val.x);
+//
+//            surface_offset.x += dir.x*((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
+//            surface_offset.z += dir.z*((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
 
 //            surface_offset.y += (amplitude.x * cos_val.y);
 //

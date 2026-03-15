@@ -228,8 +228,8 @@ pub const RENDER_X_SIZE: usize = 2048;
 pub const RENDER_Z_SIZE: usize = 2048;
 
 
-pub const PROFILE_BUFFER_LENGTH: usize = 512;
-// pub const PROFILE_BUFFER_LENGTH: usize = 4096;
+// pub const PROFILE_BUFFER_LENGTH: usize = 512;
+pub const PROFILE_BUFFER_LENGTH: usize = 4096;
 
 //to be put in main world
 #[derive(Resource, ExtractResource, Clone, ShaderType)]

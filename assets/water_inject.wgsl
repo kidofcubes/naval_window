@@ -10,7 +10,7 @@
     index_to_radians, layer_index
 }
 
-@group(0) @binding(0) var amplitude_out: texture_storage_2d_array<rg32float, read_write>;
+@group(0) @binding(0) var amplitude_out: texture_storage_2d_array<r32float, read_write>;
 @group(0) @binding(1) var<uniform> settings: WaterSettings;
 @group(0) @binding(2) var<uniform> debug_settings: WaterDebugSettings;
 

@@ -13,7 +13,7 @@
 
 @group(0) @binding(0) var amplitude_in: texture_2d_array<f32>;
 @group(0) @binding(1) var amplitude_sampler: sampler;
-@group(0) @binding(2) var amplitude_out: texture_storage_2d_array<rg32float, write>;
+@group(0) @binding(2) var amplitude_out: texture_storage_2d_array<r32float, write>;
 @group(0) @binding(3) var<uniform> settings: WaterSettings;
 @group(0) @binding(4) var<uniform> water_wave_group_speeds: WaterWaveGroupSpeeds;
 
@@ -58,16 +58,8 @@ fn diffuse(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let amp_0  = sample_amplitude(x, z, theta_index, zeta_index);
         let amp_p1 = sample_amplitude(x, z, theta_p1, zeta_index);
 
-        let mag_m1 = length(amp_m1);
-        let mag_0  = length(amp_0);
-        let mag_p1 = length(amp_p1);
-
         // Weighted average of magnitudes
-        let new_magnitude = (1.0 - gamma) * mag_0 + gamma * 0.5 * (mag_m1 + mag_p1);
-
-        // Preserve the phase direction from the center sample
-        let normalized = normalize(select(vec2<f32>(1.0, 0.0), amp_0, mag_0 > 0.0001));
-        let new_amplitude = normalized * new_magnitude;
+        let new_amplitude = (1.0 - gamma) * amp_0 + gamma * 0.5 * (amp_m1 + amp_p1);
 
         // Write to output
         textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 1.0));
