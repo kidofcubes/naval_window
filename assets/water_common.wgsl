@@ -3,16 +3,20 @@
 // Grid dimensions
 //const GRID_X_SIZE: u32 = 64u;
 //const GRID_Z_SIZE: u32 = 64u;
-const GRID_X_SIZE: u32 = 256u;
-const GRID_Z_SIZE: u32 = 256u;
-//const RENDER_X_SIZE: u32 = 64u;
-//const RENDER_Z_SIZE: u32 = 64u;
-const RENDER_X_SIZE: u32 = 2048u;
-const RENDER_Z_SIZE: u32 = 2048u;
-const DIRECTIONS: u32 = 64u;
+//const GRID_X_SIZE: u32 = 256u;
+//const GRID_Z_SIZE: u32 = 256u;
+//const GRID_X_SIZE: u32 = 2048u;
+//const GRID_Z_SIZE: u32 = 2048u;
+const GRID_X_SIZE: u32 = 1024u;
+const GRID_Z_SIZE: u32 = 1024u;
+const RENDER_X_SIZE: u32 = 64u;
+const RENDER_Z_SIZE: u32 = 64u;
+//const RENDER_X_SIZE: u32 = 2048u;
+//const RENDER_Z_SIZE: u32 = 2048u;
+const DIRECTIONS: u32 = 48u;
 const TOTAL_ZETA_NUMBERS: u32 = 4u;
-//const PROFILE_BUFFER_LENGTH: u32 = 512u;
-const PROFILE_BUFFER_LENGTH: u32 = 4096u;
+const PROFILE_BUFFER_LENGTH: u32 = 512u;
+//const PROFILE_BUFFER_LENGTH: u32 = 4096u;
 
 // Wave parameters
 const PERIODICITY: f32 = 4.0;

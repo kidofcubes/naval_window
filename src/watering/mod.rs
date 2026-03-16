@@ -1,6 +1,7 @@
 mod compute_shader;
 mod pre_compute;
 mod cpu_debug_impl;
+pub(crate) mod water_lod;
 
 use std::f32::consts::TAU;
 use std::time::Instant;
@@ -18,6 +19,7 @@ use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::render::render_graph::RenderGraphExt;
 use crate::watering::cpu_debug_impl::CpuDebugWatering;
 use crate::watering::pre_compute::compute_group_speeds;
+use crate::watering::water_lod::WaterLodPlugin;
 
 pub struct Watering;
 impl Plugin for Watering{
@@ -209,11 +211,14 @@ fn debug_input_system(
 // pub const GRID_X_SIZE: usize = 64;
 // pub const GRID_Z_SIZE: usize = 64;
 
-pub const GRID_X_SIZE: usize = 256;
-pub const GRID_Z_SIZE: usize = 256;
+// pub const GRID_X_SIZE: usize = 256;
+// pub const GRID_Z_SIZE: usize = 256;
+
+pub const GRID_X_SIZE: usize = 1024;
+pub const GRID_Z_SIZE: usize = 1024;
 
 // pub const DIRECTIONS: usize = 1;
-pub const DIRECTIONS: usize = 64;
+pub const DIRECTIONS: usize = 48;
 // pub const TOTAL_ZETA_NUMBERS: usize = 1;
 pub const TOTAL_ZETA_NUMBERS: usize = 4;
 pub const MIN_ZETA: f32 = -5.0;
@@ -224,12 +229,14 @@ const GRAVITY: f32 = 9.81;
 
 // pub const RENDER_X_SIZE: usize = 256;
 // pub const RENDER_Z_SIZE: usize = 256;
-pub const RENDER_X_SIZE: usize = 2048;
-pub const RENDER_Z_SIZE: usize = 2048;
+// pub const RENDER_X_SIZE: usize = 2048;
+// pub const RENDER_Z_SIZE: usize = 2048;
+pub const RENDER_X_SIZE: usize = 64;
+pub const RENDER_Z_SIZE: usize = 64;
 
 
-// pub const PROFILE_BUFFER_LENGTH: usize = 512;
-pub const PROFILE_BUFFER_LENGTH: usize = 4096;
+pub const PROFILE_BUFFER_LENGTH: usize = 512;
+// pub const PROFILE_BUFFER_LENGTH: usize = 4096;
 
 //to be put in main world
 #[derive(Resource, ExtractResource, Clone, ShaderType)]

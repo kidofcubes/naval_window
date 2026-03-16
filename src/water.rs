@@ -11,6 +11,7 @@ use rand::{random, random_bool, random_range};
 use crate::{watering, BuildData};
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
 use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, Watering};
+use crate::watering::water_lod::WaterLodPlugin;
 
 const SHADER_ASSET_PATH: &str = "custom_material.wgsl";
 
@@ -26,6 +27,7 @@ impl Plugin for WaterPlugin {
         });
 
         app.add_plugins(Watering);
+        app.add_plugins(WaterLodPlugin {});
         app.add_systems(Startup, setup.after(watering::setup_height_field));
         app.add_systems(Update, update);
     }
@@ -47,7 +49,7 @@ fn setup(
     //         half_size: Vec2::new(50.0, 50.0),
     //         normal: Dir3::Y,
     //     });
-    let mesh = generate_dense_plane(Vec3::new(0.0, 1.0, 0.0), 1024, 400.0, 400.0, -200.0,-200.0);
+    // let mesh = generate_dense_plane(Vec3::new(0.0, 1.0, 0.0), 1024, 400.0, 400.0, -200.0,-200.0);
         // Sets the custom attribute
         // .with_inserted_attribute(
         //     ATTRIBUTE_BLEND_COLOR,
@@ -61,6 +63,23 @@ fn setup(
     //     MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
     //     Transform::from_xyz(0.0, 0.0, 0.0),
     // ));
+
+
+    let water_lod_mesh = crate::watering::water_lod::WaterLodMesh {
+        last_camera_pos: Vec3::ZERO,
+        center: Vec2::ZERO,
+    };
+
+    let mesh     = crate::watering::water_lod::build_lod_mesh(Vec3::ZERO, &water_lod_mesh);
+    //
+    // // ── Replace this material with your custom water shader material ──────────
+    // let material = materials.add(StandardMaterial {
+    //     base_color:           Color::srgb(0.04, 0.28, 0.46),
+    //     perceptual_roughness: 0.05,
+    //     reflectance:          0.9,
+    //     ..default()
+    // });
+
 
 
     commands.spawn((
@@ -78,7 +97,8 @@ fn setup(
 
         })),
         // NoFrustumCulling,
-        Transform::from_xyz(0.0, 0.0, 0.0),
+        Transform::from_xyz(0.0, -100.0, 0.0),
+        water_lod_mesh
     ));
     // commands.insert_resource(wake_sim);
 }
