@@ -3,6 +3,14 @@
 // we can import items from shader modules in the assets folder with a quoted path
 //#import "shaders/custom_material_import.wgsl"::COLOR_MULTIPLIER
 
+#import "water_common.wgsl"::{
+    GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
+    DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
+    PERIODICITY, ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
+    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
+    index_to_radians, layer_index
+}
+
 //for time since startup
 //#import bevy_pbr::{mesh_view_bindings::globals}
 //// this is made available to the importing module
@@ -33,79 +41,139 @@ struct VertexOutput {
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> voxel_size: f32;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var voxel_texture: texture_3d<u32>;
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(5) var height_field: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(6) var height_field_sampler: sampler;
-
-@group(#{MATERIAL_BIND_GROUP}) @binding(7) var normal_field: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(8) var normal_field_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(9 ) var amplitude_texture: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var amplitude_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var profile_buffer:     texture_2d<f32>;
 
 
-const PI = 3.1415926538;
-const TAU = PI * 2;
+
+// Hardware bilinear sample from amplitude texture array
+fn sample_amplitude(x: f32, z: f32, theta_index: u32, zeta_index: u32) -> f32 {
+    // Convert to normalized UV coordinates (0-1)
+    // Add 0.5 to sample at texel centers
+    let uv = vec2<f32>((x + 0.5) / f32(GRID_X_SIZE), (z + 0.5) / f32(GRID_Z_SIZE));
+    let layer = layer_index(theta_index, zeta_index);
+
+    return textureSampleLevel(amplitude_texture, amplitude_sampler, uv, layer, 0.0).x;
+}
+
+fn modulo_f32(x: f32, n: f32) -> f32{
+    return x - floor(x / n) * n;
+}
+
+// Calculate water surface offset at a given world position
+fn calculate_water_offset(uv: vec2<f32>) -> vec3<f32> {
+    // Map UV coordinates to grid coordinates
+    let real_x = uv.x * f32(GRID_X_SIZE);
+    let real_z = uv.y * f32(GRID_Z_SIZE);
+
+    var surface_offset = vec3<f32>(0.0, 0.0, 0.0);
+    var tx = vec3<f32>(0.0, 0.0, 0.0);
+    var tz = vec3<f32>(0.0, 0.0, 0.0);
+
+    let direction_multiplier = 1.0/f32(DIRECTIONS);
+    let zeta_full_range = ZETA_MAX - ZETA_MIN;
+
+    for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
+        let min_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) - 0.0) / f32(TOTAL_ZETA_NUMBERS)));
+        let max_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 1.0) / f32(TOTAL_ZETA_NUMBERS)));
+        let period: f32 = f32(PERIODICITY) * pow(2,max_zeta);
+
+        for (var theta_index: u32 = 0u; theta_index < DIRECTIONS; theta_index++) {
+            let theta = index_to_radians(theta_index);
+            let dir = vec3<f32>(cos(theta), 0.0, sin(theta));
+
+            // Sample amplitude at this position and direction
+            let amplitude = sample_amplitude(real_x, real_z, theta_index, zeta_index);
+
+            // Position offset along wave direction
+            let position_offset = dot(vec2<f32>(real_x, real_z), vec2<f32>(dir.x, dir.z)) * 2.0;
+
+            // Profile buffer index (wrapping)
+            let profile_coord = position_offset + (DIRECTIONAL_OFFSETS[theta_index]/1.0);
+            let index = i32(
+                modulo_f32(f32(PROFILE_BUFFER_LENGTH) * (f32(profile_coord) / f32(period)), f32(PROFILE_BUFFER_LENGTH))
+            );
+
+            // Load profile value (cos component)
+            let cos_val = textureLoad(profile_buffer, vec2<i32>(index, i32(zeta_index)), 0) * direction_multiplier;
+
+            // Height contribution
+            surface_offset.y += (amplitude * cos_val.y);
+            surface_offset.x += dir.x * (amplitude * cos_val.x);
+            surface_offset.z += dir.z * (amplitude * cos_val.x);
+        }
+    }
+//    return vec3<f32>(0.0,sample_amplitude(real_x,real_z,0,0),0.0);
+
+    return surface_offset;
+}
+
+//// Calculate water normal at a given world position using finite differences
+//fn calculate_water_normal(world_pos: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
+//    let epsilon = 0.1; // Small offset for finite difference
+//
+//    // Sample height at neighboring points
+//    let center = calculate_water_offset(world_pos.x, world_pos.z, uv);
+//    let right = calculate_water_offset(uv + vec2(epsilon/400.0, 0.0));
+//    let up = calculate_water_offset(world_pos.x, world_pos.z + epsilon, uv + vec2(0.0, epsilon/400.0));
+//
+//    // Calculate tangent vectors
+//    let tangent_x = vec3(epsilon, right.y - center.y, 0.0);
+//    let tangent_z = vec3(0.0, up.y - center.y, epsilon);
+//
+//    // Cross product gives normal
+//    let normal = normalize(cross(tangent_x, tangent_z));
+//
+//    return normal;
+//}
+
+
+//const PI = 3.1415926538;
+//const TAU = PI * 2;
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
+    let world_from_local = get_world_from_local(vertex.instance_index);
+    let orig_world_position = world_from_local * vec4(vertex.position,1.0);
     var out: VertexOutput;
 
-//    // Transform local position to clip space (screen space)
+    // Transform local position to clip space (screen space)
     var timeMult = time * 1.0;
     var y_offset = 100.0;
-    var offset: vec3<f32> = vec3<f32>(
-        0.0,
-//        100.0+sin((timeMult+vertex.uv.x)*TAU)+cos((timeMult+vertex.uv.z)*TAU),
-        0.0+(0.0*0.5*(sin((timeMult+(vertex.uv.x*10.0))*TAU)+cos((timeMult+(vertex.uv.y*10.0))*TAU))),
-//        1.3+(0.0*(sin((timeMult+(vertex.uv.x*10.0))*TAU)+cos((timeMult+(vertex.uv.y*10.0))*TAU))),
-//        100.0+timeMult,
-        0.0
-    );
-//    offset.y += textureSampleLevel(wake_texture, wake_sampler, vertex.uv.xy, 0.0).r * 10.0;
-//    offset.y += textureSampleLevel(height_field, height_field_sampler, vertex.uv.xy, 0.0).y;
-    offset += textureSampleLevel(height_field, height_field_sampler, vertex.uv.xy, 0.0).xyz * 1.0;
-//    offset.y += textureLoad(wake_texture, vec2<i32>(vertex.uv.xy*256), 0).r * 10;
+    
+    // Calculate water displacement using UV coordinates
+    var offset: vec3<f32> = calculate_water_offset(
+//        vec2<f32>(orig_world_position.x/1024.0, orig_world_position.z/1024.0)
+       vertex.uv
+    ) * 1.0;
+    
     let world_position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);
 
     out.clip_position = mesh_position_local_to_clip(
         get_world_from_local(vertex.instance_index),
-//        vec4<f32>(vertex.position + vec3<f32>(0.0,sin(vertex.uv.x*5), 0.0), 1.0)
         world_position
     );
-//    out.world_position = world_position + vec4<f32>(0.0,10.0,0.0,0.0);
-//    out.world_position = vec4<f32>(vertex.position, 1.0)+ vec4<f32>(0.0,3.0,0.0,0.0);
-//    out.world_position = get_world_from_local(vertex.instance_index);
-    let world_from_local = get_world_from_local(vertex.instance_index);
-//    out.world_position = mesh_position_local_to_world(, vec4(vertex.position, 1.0));
+    
     out.world_position = world_from_local * world_position;
     out.uv = vertex.uv;
-//    out.blend_color = vec4<f32>(0.5,0.5,0.5, 0.5);
 
-    // This is how bevy computes the world position
-    // The vertex.instance_index is very important. Especially if you are using batching and gpu preprocessing
-//    var world_from_local = get_world_from_local(vertex.instance_index);
-//    var world_position = mesh_position_local_to_world(world_from_local, vec4(vertex.position, 1.0));
-//    out.clip_position = position_world_to_clip(world_position.xyz);
-//    out.uv = vertex.uv;
-
-//    out.color = material.color;
     return out;
 }
 
 @fragment
 fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
-//    return material_color * textureSample(material_color_texture, material_color_sampler, mesh.uv) * COLOR_MULTIPLIER;
+    // Calculate per-pixel normal using finite differences
+//    let normal = calculate_water_normal(input.world_position.xyz, input.uv);
+    
     var hull_distance = 1.0;
     hull_distance = get_ship_distance_approx(input.world_position.xyz);
     hull_distance = clamp(hull_distance, 0.0, 3.0)/3.0;
     var color = vec4<f32>(26/255.0, 100/255.0, 200/255.0, 1.0);
-//    var color = vec4<f32>(0.0,0.0,0.0, 1.0);
     color = color + (vec4<f32>(1.0) * (1.0-hull_distance));
-
-//    color = color + vec4<f32>(input.uv.xy, input.world_position.y/10.0, 1.0);
     color = color + vec4<f32>(vec3<f32>(input.world_position.y/5.0), 1.0);
-//    color = color + vec4<f32>(input.uv.xy-0.5, 0.0, 1.0);
 
     return color;
-//    return vec4<f32>(input.world_position.xz, f32(center), 1.0);
-//    return vec4<f32>(input.uv.xy, f32(), 1.0);
 }
 
 

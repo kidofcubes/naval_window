@@ -10,7 +10,7 @@ use bevy::shader::{ShaderDefVal, ShaderRef};
 use rand::{random, random_bool, random_range};
 use crate::{watering, BuildData};
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
-use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, Watering};
+use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, Watering, WaterSimulationHandles};
 use crate::watering::water_lod::WaterLodPlugin;
 
 const SHADER_ASSET_PATH: &str = "custom_material.wgsl";
@@ -28,7 +28,7 @@ impl Plugin for WaterPlugin {
 
         app.add_plugins(Watering);
         app.add_plugins(WaterLodPlugin {});
-        app.add_systems(Startup, setup.after(watering::setup_height_field));
+        app.add_systems(Startup, setup.after(watering::setup_textures));
         app.add_systems(Update, update);
     }
 }
@@ -42,6 +42,7 @@ fn setup(
     mut custom_materials: ResMut<Assets<CustomMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut height_field_handle: ResMut<HeightFieldHandle>,
+    water_sim_handles: Res<WaterSimulationHandles>,
     asset_server: Res<AssetServer>,
 ) {
 
@@ -92,9 +93,8 @@ fn setup(
             voxel_transform: Mat4::IDENTITY,
             voxel_size: 0.5,
             voxel_grid: null_texture(images.as_mut(), TextureDimension::D3, TextureFormat::R8Uint),
-            height_map: height_field_handle.offsets_handle.clone(),
-            normal_map: height_field_handle.normals_handle.clone(),
-
+            amplitude_texture: water_sim_handles.amplitude_texture_a.clone(),
+            profile_buffer: water_sim_handles.profile_buffer.clone(),
         })),
         // NoFrustumCulling,
         Transform::from_xyz(0.0, -100.0, 0.0),
@@ -110,15 +110,21 @@ fn update(
     key: Res<ButtonInput<KeyCode>>,
     mut voxel_grid_handle: ResMut<VoxelGridHandle>,
     mut voxel_settings: ResMut<VoxelSettings>,
+    mut sim_handles: ResMut<WaterSimulationHandles>,
     time: Res<Time>,
     mut gizmo: Gizmos,
 ){
+    sim_handles.flipped = !sim_handles.flipped;
     for (_, mut material) in materials.iter_mut() {
         // material.time = (time.elapsed().as_nanos() / (1000u128 * 1000u128 * 1000u128)) as f32;
         material.time = (time.elapsed().as_millis() as f32 / 1000.0) as f32;
         if let Some(voxel_grid) = build_data.voxel_grid.as_ref() && key.just_pressed(KeyCode::KeyG) {
             update_material(&mut material, voxel_grid, &mut images)
-
+        }
+        material.amplitude_texture = if sim_handles.flipped {
+            sim_handles.amplitude_texture_b.clone()
+        } else {
+            sim_handles.amplitude_texture_a.clone()
         }
     }
     // if let Some(voxel_grid) = build_data.voxel_grid.as_ref() && key.just_pressed(KeyCode::KeyG) {
@@ -152,21 +158,12 @@ pub struct CustomMaterial {
     // #[sampler(3)]
     voxel_grid: Handle<Image>,
 
-
-    #[texture(5, dimension = "2d", sample_type = "float")]
-    #[sampler(6)]
-    height_map: Handle<Image>,
-
-    #[texture(7, dimension = "2d", sample_type = "float")]
-    #[sampler(8)]
-    normal_map: Handle<Image>,
-
-    // #[uniform(0)]
-    // color: LinearRgba,
-    // #[texture(1)]
-//     #[sampler(2)]
-//     color_texture: Option<Handle<Image>>,
-//     alpha_mode: AlphaMode,
+    #[texture(9, dimension = "2d_array", sample_type = "float")]
+    #[sampler(10)]
+    amplitude_texture: Handle<Image>,
+    
+    #[texture(11, dimension = "2d", sample_type = "float")]
+    profile_buffer: Handle<Image>,
 }
 
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.

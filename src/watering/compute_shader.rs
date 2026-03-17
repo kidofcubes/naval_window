@@ -2,12 +2,11 @@ use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph;
 use bevy::render::render_graph::{NodeRunError, RenderGraphContext, RenderLabel};
-use bevy::render::render_resource::{encase, AddressMode, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, DynamicUniformBuffer, Extent3d, FilterMode, PipelineCache, SamplerDescriptor, ShaderStages, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
+use bevy::render::render_resource::{encase, AddressMode, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, DynamicUniformBuffer, Extent3d, FilterMode, PipelineCache, Sampler, SamplerDescriptor, ShaderStages, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
 use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, texture_3d, texture_storage_2d, texture_storage_2d_array, uniform_buffer};
-use bevy::render::render_resource::Sampler;
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
-use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_ZETA_NUMBERS};
+use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_ZETA_NUMBERS, WaterSimulationHandles};
 // use bevy::render::render_resource::encase::matrix::MatrixScalar;
 // use bevy::render::render_resource::encase::matrix::AsMutMatrixParts;
 
@@ -20,10 +19,10 @@ pub struct WaterGpuResources {
     // Two Texture2DArrays, each with NUM_DIRECTIONS layers.
     // Each layer stores A(x, y) for one propagation direction θ_d.
     // We alternate read ↔ write each frame to avoid read-write hazards.
-    pub amplitude_a:      Texture,
-    pub amplitude_a_view: TextureView,
-    pub amplitude_b:      Texture,
-    pub amplitude_b_view: TextureView,
+    // pub amplitude_a:      Texture,
+    // pub amplitude_a_view: TextureView,
+    // pub amplitude_b:      Texture,
+    // pub amplitude_b_view: TextureView,
     /// false → A is read, B is write.  true → B is read, A is write.
     pub flip: bool,
 
@@ -40,14 +39,14 @@ pub struct WaterGpuResources {
 }
 
 impl WaterGpuResources {
-    /// Return (read_view, write_view) for the current frame.
-    pub fn amp_views(&self) -> (&TextureView, &TextureView) {
-        if self.flip {
-            (&self.amplitude_b_view, &self.amplitude_a_view)
-        } else {
-            (&self.amplitude_a_view, &self.amplitude_b_view)
-        }
-    }
+    // /// Return (read_view, write_view) for the current frame.
+    // pub fn amp_views(&self) -> (&TextureView, &TextureView) {
+    //     if self.flip {
+    //         (&self.amplitude_b_view, &self.amplitude_a_view)
+    //     } else {
+    //         (&self.amplitude_a_view, &self.amplitude_b_view)
+    //     }
+    // }
 }
 
 
@@ -69,12 +68,11 @@ impl render_graph::Node for WaterSimulationNode {
         let Some(bgs)      = world.get_resource::<WaterBindGroups>() else { return Ok(()) };
 
         // Fetch compiled pipelines — skip if any aren't ready yet.
-        let (Some(inj_pl), Some(adv_pl), Some(diff_pl), Some(prof_pl), Some(hgt_pl)) = (
+        let (Some(inj_pl), Some(adv_pl), Some(diff_pl), Some(prof_pl)) = (
             pipeline_cache.get_compute_pipeline(pipelines.inject_id),
             pipeline_cache.get_compute_pipeline(pipelines.advection_id),
             pipeline_cache.get_compute_pipeline(pipelines.diffusion_id),
             pipeline_cache.get_compute_pipeline(pipelines.profile_id),
-            pipeline_cache.get_compute_pipeline(pipelines.height_id),
         ) else {
             return Ok(());
         };
@@ -83,7 +81,6 @@ impl render_graph::Node for WaterSimulationNode {
         // Each shader uses @workgroup_size(64, 64, 1) over the grid / profile.
         let wg_grid    = (GRID_X_SIZE.div_ceil(32) as u32, GRID_Z_SIZE.div_ceil(32) as u32, DIRECTIONS as u32);
         let wg_profile = (PROFILE_BUFFER_LENGTH.div_ceil(128) as u32, 1, 1);
-        let wg_height  = (RENDER_X_SIZE.div_ceil(32) as u32, RENDER_Z_SIZE.div_ceil(32) as u32, 1);
 
         let encoder = ctx.command_encoder();
 
@@ -140,17 +137,9 @@ impl render_graph::Node for WaterSimulationNode {
             pass.dispatch_workgroups(wg_profile.0, wg_profile.1, wg_profile.2);
         }
 
-        // ── Pass 4 : Height reconstruction ─────────────────────────────────
-        // η(x, y) = Σ_d  A(x, y, d) · Ψ(k̂_d · x_world + φ_d)
-        {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label:            Some("water_height"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(hgt_pl);
-            pass.set_bind_group(0, &bgs.height, &[]);
-            pass.dispatch_workgroups(wg_height.0, wg_height.1, wg_height.2);
-        }
+        // Note: Height reconstruction is now done in the material vertex/fragment shaders
+        // They sample the amplitude textures directly and compute offsets per-vertex
+        // and normals per-pixel using the profile buffer.
 
         Ok(())
     }
@@ -190,10 +179,10 @@ pub fn prepare_gpu_resources(
         ..default()
     };
 
-    let amplitude_a      = render_device.create_texture(&TextureDescriptor { label: Some("amp_a"), ..amp_desc });
-    let amplitude_a_view = amplitude_a.create_view(&array_view_desc);
-    let amplitude_b      = render_device.create_texture(&TextureDescriptor { label: Some("amp_b"), ..amp_desc });
-    let amplitude_b_view = amplitude_b.create_view(&array_view_desc);
+    // let amplitude_a      = render_device.create_texture(&TextureDescriptor { label: Some("amp_a"), ..amp_desc });
+    // let amplitude_a_view = amplitude_a.create_view(&array_view_desc);
+    // let amplitude_b      = render_device.create_texture(&TextureDescriptor { label: Some("amp_b"), ..amp_desc });
+    // let amplitude_b_view = amplitude_b.create_view(&array_view_desc);
 
     // ── Amplitude sampler ─────────────────────────────────────────────────
     let amplitude_sampler = render_device.create_sampler(&SamplerDescriptor {
@@ -243,10 +232,10 @@ pub fn prepare_gpu_resources(
     });
 
     commands.insert_resource(WaterGpuResources {
-        amplitude_a,
-        amplitude_a_view,
-        amplitude_b,
-        amplitude_b_view,
+        // amplitude_a,
+        // amplitude_a_view,
+        // amplitude_b,
+        // amplitude_b_view,
         flip: false,
         amplitude_sampler,
         profile_buf,
@@ -264,7 +253,6 @@ pub struct WaterPipelines {
     pub advection_layout: BindGroupLayoutDescriptor,
     pub diffusion_layout: BindGroupLayoutDescriptor,
     pub profile_layout:   BindGroupLayoutDescriptor,
-    pub height_layout:    BindGroupLayoutDescriptor,
 
     // ── Cached pipeline IDs ────────────────────────────────────────────────
     /// Pass 0 – debug amplitude injection (optional, runs when inject flag is set).
@@ -275,8 +263,6 @@ pub struct WaterPipelines {
     pub diffusion_id: CachedComputePipelineId,
     /// Pass 3 – build the 1-D profile buffer Ψ(p) from the Phillips spectrum.
     pub profile_id:   CachedComputePipelineId,
-    /// Pass 4 – reconstruct the visible height field η(x, y).
-    pub height_id:    CachedComputePipelineId,
 }
 
 impl FromWorld for WaterPipelines {
@@ -355,7 +341,6 @@ impl FromWorld for WaterPipelines {
         // ── Profile layout ─────────────────────────────────────────────────
         // Binding 0 : profile_out (Texture2D 1×N, WriteOnly)
         // Binding 1 : settings    (Uniform)
-        // let profile_layout = device.create_bind_group_layout(
         let profile_layout = BindGroupLayoutDescriptor::new(
             "profile_layout",
             &BindGroupLayoutEntries::sequential(
@@ -370,43 +355,12 @@ impl FromWorld for WaterPipelines {
             ),
         );
 
-        // ── Height layout ──────────────────────────────────────────────────
-        // Binding 0 : amplitude (Texture2DArray, sampled)
-        // Binding 1 : amplitude_sampler (Sampler)
-        // Binding 2 : profile   (Texture2D, ReadOnly storage)
-        // Binding 3 : height out (Texture2D, WriteOnly storage)
-        // Binding 4 : normal out (Texture2D, WriteOnly storage, rgba32float)
-        // Binding 5 : settings  (Uniform)
-        let height_layout = BindGroupLayoutDescriptor::new(
-            "height_layout",
-            &BindGroupLayoutEntries::sequential(
-                ShaderStages::COMPUTE,
-                (
-                    texture_2d_array(bevy::render::render_resource::TextureSampleType::Float { filterable: true }),
-                    sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
-                    texture_storage_2d(
-                        TextureFormat::Rgba32Float,
-                        StorageTextureAccess::ReadOnly,
-                    ),
-                    texture_storage_2d(
-                        TextureFormat::Rgba32Float,
-                        StorageTextureAccess::WriteOnly,
-                    ),
-                    texture_storage_2d(
-                        TextureFormat::Rgba32Float,
-                        StorageTextureAccess::WriteOnly,
-                    ),
-                    uniform_buffer::<WaterSettings>(false),
-                ),
-            ),
-        );
-
         // ── Load shaders ───────────────────────────────────────────────────
         let inject_shader  = asset_server.load("water_inject.wgsl");
         let adv_shader     = asset_server.load("water_advection.wgsl");
         let diffusion_shader = asset_server.load("water_diffusion.wgsl");
         let profile_shader = asset_server.load("water_profile.wgsl");
-        let height_shader  = asset_server.load("water_height.wgsl");
+        // let height_shader  = asset_server.load("water_height.wgsl");
 
         // ── Queue pipelines ────────────────────────────────────────────────
         let inject_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
@@ -450,12 +404,12 @@ impl FromWorld for WaterPipelines {
         });
 
         let height_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label:                        Some("water_height".into()),
-            layout:                       vec![height_layout.clone()],
+            label:                        None,
+            layout:                       vec![],
             push_constant_ranges:         vec![],
-            shader:                       height_shader,
+            shader:                       asset_server.load("water_height.wgsl"),
             shader_defs:                  vec![],
-            entry_point:                  Some("reconstruct_height".into()),
+            entry_point:                  None,
             zero_initialize_workgroup_memory: false,
         });
 
@@ -464,12 +418,10 @@ impl FromWorld for WaterPipelines {
             advection_layout,
             diffusion_layout,
             profile_layout,
-            height_layout,
             inject_id,
             advection_id,
             diffusion_id,
             profile_id,
-            height_id,
         }
     }
 }
@@ -482,7 +434,6 @@ pub struct WaterBindGroups {
     pub advection: BindGroup,
     pub diffusion: BindGroup,
     pub profile:   BindGroup,
-    pub height:    BindGroup,
     /// Settings uniform buffer (updated via write_buffer each frame).
     pub settings_buf: Buffer,
     /// Debug settings uniform buffer.
@@ -503,17 +454,23 @@ pub fn queue_bind_groups(
     voxel_handle:  Res<VoxelGridHandle>,
     water_wave_group_speeds:  Res<WaterWaveGroupSpeeds>,
     existing_bgs:  Option<ResMut<WaterBindGroups>>,
-    hf_handle:     Option<ResMut<HeightFieldHandle>>,
+    // hf_handle:     Option<ResMut<HeightFieldHandle>>,
+    sim_handle:     Option<ResMut<WaterSimulationHandles>>,
     render_images: Res<RenderAssets<GpuImage>>,
     queue:         Res<bevy::render::renderer::RenderQueue>,
     pipeline_cache: Res<PipelineCache>,
 ) {
     let Some(mut gpu) = gpu else { return };
 
-    let Some(hf_handle) = hf_handle else { return };
+    // let Some(hf_handle) = hf_handle else { return };
+    let Some(sim_handle) = sim_handle else { return };
     // Get the GpuImage Bevy uploaded from your Image asset
-    let Some(offsets_gpu_image) = render_images.get(&hf_handle.offsets_handle) else { return };
-    let Some(normal_gpu_image) = render_images.get(&hf_handle.normals_handle) else { return };
+    // let Some(offsets_gpu_image) = render_images.get(&hf_handle.offsets_handle) else { return };
+    // let Some(normal_gpu_image) = render_images.get(&hf_handle.normals_handle) else { return };
+
+    let Some(amp_a) = render_images.get(&sim_handle.amplitude_texture_a) else { return };
+    let Some(amp_b) = render_images.get(&sim_handle.amplitude_texture_b) else { return };
+    let Some(profile_buffer) = render_images.get(&sim_handle.profile_buffer) else { return };
 
     // Get the voxel grid texture
     let Some(voxel_handle) = &voxel_handle.0 else { return };
@@ -522,8 +479,9 @@ pub fn queue_bind_groups(
 
     // This texture_view is the exact same texture the material will sample.
     // Use it as the compute shader's write target.
-    let height_write_view = &offsets_gpu_image.texture_view;
-    let normal_write_view = &normal_gpu_image.texture_view;
+    // let height_write_view = &offsets_gpu_image.texture_view;
+    // let normal_write_view = &normal_gpu_image.texture_view;
+
 
     // ── Create or update the uniform buffers ────────────────────────────────
     let (settings_buf, debug_settings_buf, voxel_settings_buf, water_wave_group_speeds_buf) = if let Some(mut bgs) = existing_bgs {
@@ -583,7 +541,13 @@ pub fn queue_bind_groups(
         (settings_buf, debug_settings_buf, voxel_settings_buf, water_wave_group_speeds_buf)
     };
 
-    let (amp_read, amp_write) = gpu.amp_views();
+    // let (amp_read, amp_write) = gpu.amp_views();
+
+    let (amp_read, amp_write) = if sim_handle.flipped {
+        (&amp_b.texture_view, &amp_a.texture_view)
+    } else {
+        (&amp_a.texture_view, &amp_b.texture_view)
+    };
 
     // Inject writes to the *write* texture (before advection reads from it next frame)
     let inject = device.create_bind_group(
@@ -628,21 +592,8 @@ pub fn queue_bind_groups(
         "profile_bg",
         &pipeline_cache.get_bind_group_layout(&pipelines.profile_layout),
         &BindGroupEntries::sequential((
-            &gpu.profile_buf_view,
-            settings_buf.as_entire_binding(),
-        )),
-    );
-
-    // Height reconstruction reads the diffused amplitude (amp_read after diffusion writes to it).
-    let height = device.create_bind_group(
-        "height_bg",
-        &pipeline_cache.get_bind_group_layout(&pipelines.height_layout),
-        &BindGroupEntries::sequential((
-            amp_read,
-            &gpu.amplitude_sampler,
-            &gpu.profile_buf_view,
-            height_write_view,
-            normal_write_view,
+            // &gpu.profile_buf_view,
+            &profile_buffer.texture_view,
             settings_buf.as_entire_binding(),
         )),
     );
@@ -652,7 +603,6 @@ pub fn queue_bind_groups(
         advection,
         diffusion,
         profile,
-        height,
         settings_buf,
         debug_settings_buf,
         voxel_settings_buf,

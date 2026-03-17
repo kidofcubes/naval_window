@@ -53,7 +53,7 @@ impl Plugin for Watering{
                 wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_ZETA_NUMBERS).iter().map(|x| vec4(*x, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap()
             })
             .insert_resource(VoxelSettings::default())
-            .add_systems(Startup, (setup_height_field))
+            .add_systems(Startup, (setup_textures))
             .add_systems(Update, debug_input_system)
             .add_systems(Update, (tick_water_time, sync_voxel_grid))
         // Advance simulation time each frame
@@ -68,6 +68,7 @@ impl Plugin for Watering{
                 .add_plugins(ExtractResourcePlugin::<VoxelSettings>::default())
                 .add_plugins(ExtractResourcePlugin::<VoxelGridHandle>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterWaveGroupSpeeds>::default())
+                .add_plugins(ExtractResourcePlugin::<WaterSimulationHandles>::default())
             ;
             let render_app = app.sub_app_mut(RenderApp);
             render_app
@@ -108,7 +109,7 @@ impl Plugin for Watering{
 }
 
 
-pub fn setup_height_field(
+pub fn setup_textures(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
@@ -151,7 +152,77 @@ pub fn setup_height_field(
         ..default()
     };
 
-    commands.insert_resource(HeightFieldHandle{ offsets_handle: images.add(offsets_image), normals_handle: images.add(normal_image)});
+    // Create placeholder amplitude texture
+    let amplitude_image_a = Image {
+        texture_descriptor: TextureDescriptor {
+            label:               Some("amplitude_texture"),
+            size:                Extent3d { 
+                width: GRID_X_SIZE as u32, 
+                height: GRID_Z_SIZE as u32, 
+                depth_or_array_layers: (DIRECTIONS * TOTAL_ZETA_NUMBERS) as u32 
+            },
+            mip_level_count:     1,
+            sample_count:        1,
+            dimension:           TextureDimension::D2,
+            format:              TextureFormat::R32Float,
+            usage:               TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::STORAGE_BINDING,
+            view_formats:        &[],
+        },
+        data: Some(vec![0u8; (GRID_X_SIZE * GRID_Z_SIZE * DIRECTIONS * TOTAL_ZETA_NUMBERS * 4) as usize]),
+        ..default()
+    };
+    let amplitude_image_b = Image {
+        texture_descriptor: TextureDescriptor {
+            label:               Some("amplitude_texture"),
+            size:                Extent3d {
+                width: GRID_X_SIZE as u32,
+                height: GRID_Z_SIZE as u32,
+                depth_or_array_layers: (DIRECTIONS * TOTAL_ZETA_NUMBERS) as u32
+            },
+            mip_level_count:     1,
+            sample_count:        1,
+            dimension:           TextureDimension::D2,
+            format:              TextureFormat::R32Float,
+            usage:               TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::STORAGE_BINDING,
+            view_formats:        &[],
+        },
+        data: Some(vec![0u8; (GRID_X_SIZE * GRID_Z_SIZE * DIRECTIONS * TOTAL_ZETA_NUMBERS * 4) as usize]),
+        ..default()
+    };
+
+    // Create placeholder profile buffer
+    let profile_image = Image {
+        texture_descriptor: TextureDescriptor {
+            label:               Some("profile_buffer"),
+            size:                Extent3d { width: PROFILE_BUFFER_LENGTH as u32, height: TOTAL_ZETA_NUMBERS as u32, depth_or_array_layers: 1 },
+            mip_level_count:     1,
+            sample_count:        1,
+            dimension:           TextureDimension::D2,
+            format:              TextureFormat::Rgba32Float,
+            usage:               TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::STORAGE_BINDING,
+            view_formats:        &[],
+        },
+        data: Some(vec![0u8; (PROFILE_BUFFER_LENGTH * TOTAL_ZETA_NUMBERS * 16) as usize]),
+        ..default()
+    };
+
+    commands.insert_resource(HeightFieldHandle{ 
+        offsets_handle: images.add(offsets_image), 
+        normals_handle: images.add(normal_image)
+    });
+    
+    commands.insert_resource(WaterSimulationHandles {
+        amplitude_texture_a: images.add(amplitude_image_a),
+        amplitude_texture_b: images.add(amplitude_image_b),
+        profile_buffer: images.add(profile_image),
+        flipped: false
+    });
 }
 
 // ─── Update Systems ──────────────────────────────────────────────────────────
@@ -297,6 +368,15 @@ impl Default for VoxelSettings {
 /// Handle to the voxel grid 3D texture
 #[derive(Resource, ExtractResource, Clone)]
 pub struct VoxelGridHandle(pub Option<Handle<Image>>);
+
+/// Handles to water simulation textures for use in materials
+#[derive(Resource, ExtractResource, Clone)]
+pub struct WaterSimulationHandles {
+    pub amplitude_texture_a: Handle<Image>,
+    pub amplitude_texture_b: Handle<Image>,
+    pub profile_buffer: Handle<Image>,
+    pub flipped: bool,
+}
 
 fn setup_voxel_fallback(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     // let handle = crate::voxelize::null_texture(&mut images, TextureDimension::D3, TextureFormat::R8Uint);
