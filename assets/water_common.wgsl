@@ -9,6 +9,9 @@
 //const GRID_Z_SIZE: u32 = 2048u;
 const GRID_X_SIZE: u32 = 1024u;
 const GRID_Z_SIZE: u32 = 1024u;
+
+const GRID_SCALE: f32 = 0.5;
+
 const RENDER_X_SIZE: u32 = 64u;
 const RENDER_Z_SIZE: u32 = 64u;
 //const RENDER_X_SIZE: u32 = 2048u;

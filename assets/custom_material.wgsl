@@ -4,7 +4,7 @@
 //#import "shaders/custom_material_import.wgsl"::COLOR_MULTIPLIER
 
 #import "water_common.wgsl"::{
-    GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
+    GRID_X_SIZE, GRID_Z_SIZE, GRID_SCALE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
     PERIODICITY, ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
     GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
@@ -63,6 +63,9 @@ fn modulo_f32(x: f32, n: f32) -> f32{
 
 // Calculate water surface offset at a given world position
 fn calculate_water_offset(uv: vec2<f32>) -> vec3<f32> {
+    if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0){
+        return vec3<f32>(0.0,0.0,0.0);
+    }
     // Map UV coordinates to grid coordinates
     let real_x = uv.x * f32(GRID_X_SIZE);
     let real_z = uv.y * f32(GRID_Z_SIZE);
@@ -87,7 +90,7 @@ fn calculate_water_offset(uv: vec2<f32>) -> vec3<f32> {
             let amplitude = sample_amplitude(real_x, real_z, theta_index, zeta_index);
 
             // Position offset along wave direction
-            let position_offset = dot(vec2<f32>(real_x, real_z), vec2<f32>(dir.x, dir.z)) * 2.0;
+            let position_offset = dot(vec2<f32>(real_x, real_z), vec2<f32>(dir.x, dir.z)) * GRID_SCALE;
 
             // Profile buffer index (wrapping)
             let profile_coord = position_offset + (DIRECTIONAL_OFFSETS[theta_index]/1.0);
@@ -106,7 +109,7 @@ fn calculate_water_offset(uv: vec2<f32>) -> vec3<f32> {
     }
 //    return vec3<f32>(0.0,sample_amplitude(real_x,real_z,0,0),0.0);
 
-    return surface_offset;
+    return surface_offset / GRID_SCALE;
 }
 
 //// Calculate water normal at a given world position using finite differences
@@ -144,8 +147,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     
     // Calculate water displacement using UV coordinates
     var offset: vec3<f32> = calculate_water_offset(
-//        vec2<f32>(orig_world_position.x/1024.0, orig_world_position.z/1024.0)
-       vertex.uv
+        vec2<f32>((orig_world_position.x/1024.0)+0.5, (orig_world_position.z/1024.0)+0.5)
+//       vertex.uv
     ) * 1.0;
     
     let world_position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);

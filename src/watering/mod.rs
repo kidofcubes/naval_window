@@ -50,7 +50,7 @@ impl Plugin for Watering{
                 0: None
             })
             .insert_resource(WaterWaveGroupSpeeds {
-                wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_ZETA_NUMBERS).iter().map(|x| vec4(*x, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap()
+                wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_ZETA_NUMBERS).iter().map(|x| vec4(*x * GRID_SCALE, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap()
             })
             .insert_resource(VoxelSettings::default())
             .add_systems(Startup, (setup_textures))
@@ -287,6 +287,7 @@ fn debug_input_system(
 
 pub const GRID_X_SIZE: usize = 1024;
 pub const GRID_Z_SIZE: usize = 1024;
+pub const GRID_SCALE: f32 = 0.5; //how many meters each grid cell represents
 
 // pub const DIRECTIONS: usize = 1;
 pub const DIRECTIONS: usize = 48;
