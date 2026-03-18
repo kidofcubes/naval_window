@@ -244,9 +244,9 @@ fn emit_patch(
     // patch edge to SKIRT_DEPTH below y=0. The curtain covers any crack from
     // any viewing angle above the waterline.
 
-    for edge in [SkirtEdge::South, SkirtEdge::North, SkirtEdge::West, SkirtEdge::East] {
-        emit_skirt(base, edge, positions, normals, uvs, indices);
-    }
+    // for edge in [SkirtEdge::South, SkirtEdge::North, SkirtEdge::West, SkirtEdge::East] {
+    //     emit_skirt(base, edge, positions, normals, uvs, indices);
+    // }
 }
 
 /// Which edge of the patch this skirt hangs from.

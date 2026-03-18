@@ -1,5 +1,26 @@
 //#import bevy_pbr::forward_io::VertexOutput
 #import bevy_pbr::{mesh_functions::{get_world_from_local, mesh_position_local_to_clip, mesh_position_local_to_world}}
+
+#import bevy_pbr::{
+    pbr_fragment::pbr_input_from_standard_material,
+    pbr_functions::alpha_discard,
+    view_transformations::position_world_to_clip,
+}
+
+
+#ifdef PREPASS_PIPELINE
+#import bevy_pbr::{
+    prepass_io::{Vertex, VertexOutput, FragmentOutput},
+    pbr_deferred_functions::deferred_output,
+}
+#else
+#import bevy_pbr::{
+    forward_io::{Vertex, VertexOutput, FragmentOutput},
+    pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
+}
+#endif
+
+
 // we can import items from shader modules in the assets folder with a quoted path
 //#import "shaders/custom_material_import.wgsl"::COLOR_MULTIPLIER
 
@@ -16,17 +37,17 @@
 //// this is made available to the importing module
 const COLOR_MULTIPLIER: vec4<f32> = vec4<f32>(1.0, 1.0, 1.0, 0.5);
 
-struct Vertex {
-    @builtin(instance_index) instance_index: u32,
-    @location(0) position: vec3<f32>,
-    @location(1) uv: vec2<f32>,
-};
-
-struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-    @location(1) world_position: vec4<f32>,
-};
+//struct Vertex {
+//    @builtin(instance_index) instance_index: u32,
+//    @location(0) position: vec3<f32>,
+//    @location(1) uv: vec2<f32>,
+//};
+//
+//struct VertexOutput {
+//    @builtin(position) clip_position: vec4<f32>,
+//    @location(0) uv: vec2<f32>,
+//    @location(1) world_position: vec4<f32>,
+//};
 
 //struct FragmentInput {
 //    @location(0) blend_color: vec4<f32>,
@@ -36,14 +57,14 @@ struct VertexOutput {
 //@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material_color: vec4<f32>;
 //@group(#{MATERIAL_BIND_GROUP}) @binding(1) var material_color_texture: texture_2d<f32>;
 //@group(#{MATERIAL_BIND_GROUP}) @binding(2) var material_color_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> time: f32;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> voxel_transform: mat4x4<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> voxel_size: f32;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var voxel_texture: texture_3d<u32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> time: f32;
+@group(#{MATERIAL_BIND_GROUP}) @binding(101) var<uniform> voxel_transform: mat4x4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(102) var<uniform> voxel_size: f32;
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var voxel_texture: texture_3d<u32>;
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(9 ) var amplitude_texture: texture_2d_array<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(10) var amplitude_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(11) var profile_buffer:     texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(109 ) var amplitude_texture: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(110) var amplitude_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(111) var profile_buffer:     texture_2d<f32>;
 
 
 
@@ -135,8 +156,16 @@ fn calculate_water_offset(uv: vec2<f32>) -> vec3<f32> {
 //const PI = 3.1415926538;
 //const TAU = PI * 2;
 
+//@vertex
+//fn prepass_vertex(vertex: Vertex) -> VertexOutput {
+//    return translate_vertex(vertex);
+//}
+
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
+    return translate_vertex(vertex);
+}
+fn translate_vertex(vertex: Vertex) -> VertexOutput {
     let world_from_local = get_world_from_local(vertex.instance_index);
     let orig_world_position = world_from_local * vec4(vertex.position,1.0);
     var out: VertexOutput;
@@ -144,40 +173,58 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // Transform local position to clip space (screen space)
     var timeMult = time * 1.0;
     var y_offset = 100.0;
-    
+
     // Calculate water displacement using UV coordinates
     var offset: vec3<f32> = calculate_water_offset(
         vec2<f32>((orig_world_position.x/1024.0)+0.5, (orig_world_position.z/1024.0)+0.5)
 //       vertex.uv
     ) * 1.0;
-    
-    let world_position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);
 
-    out.clip_position = mesh_position_local_to_clip(
-        get_world_from_local(vertex.instance_index),
-        world_position
+    let position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);
+
+    out.position = mesh_position_local_to_clip(
+        world_from_local,
+        position
     );
-    
-    out.world_position = world_from_local * world_position;
+
+    out.world_position = world_from_local * position;
     out.uv = vertex.uv;
 
     return out;
 }
 
-@fragment
-fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
-    // Calculate per-pixel normal using finite differences
-//    let normal = calculate_water_normal(input.world_position.xyz, input.uv);
-    
-    var hull_distance = 1.0;
-    hull_distance = get_ship_distance_approx(input.world_position.xyz);
-    hull_distance = clamp(hull_distance, 0.0, 3.0)/3.0;
-    var color = vec4<f32>(26/255.0, 100/255.0, 200/255.0, 1.0);
-    color = color + (vec4<f32>(1.0) * (1.0-hull_distance));
-    color = color + vec4<f32>(vec3<f32>(input.world_position.y/5.0), 1.0);
-
-    return color;
-}
+//@fragment
+//fn fragment(
+//    in: VertexOutput,
+//    @builtin(front_facing) is_front: bool,
+//) -> FragmentOutput {
+//
+//    // generate a PbrInput struct from the StandardMaterial bindings
+//    var pbr_input = pbr_input_from_standard_material(in, is_front);
+//#ifdef PREPASS_PIPELINE
+//    pbr_input.world_normal = normalize(vec3(1.0,1.0,1.0));
+//    let out = deferred_output(in, pbr_input);
+//#else
+//    var out: FragmentOutput;
+//    pbr_input.world_normal = normalize(vec3(1.0,1.0,1.0));
+//    out.color = apply_pbr_lighting(pbr_input);
+//    out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+//#endif
+//    return out;
+////
+////
+////    // Calculate per-pixel normal using finite differences
+//////    let normal = calculate_water_normal(input.world_position.xyz, input.uv);
+////
+////    var hull_distance = 1.0;
+////    hull_distance = get_ship_distance_approx(input.world_position.xyz);
+////    hull_distance = clamp(hull_distance, 0.0, 3.0)/3.0;
+////    var color = vec4<f32>(26/255.0, 100/255.0, 200/255.0, 1.0);
+////    color = color + (vec4<f32>(1.0) * (1.0-hull_distance));
+////    color = color + vec4<f32>(vec3<f32>(input.world_position.y/5.0), 1.0);
+////
+////    return color;
+//}
 
 
 fn get_ship_distance_approx(world_pos: vec3<f32>) -> f32 {

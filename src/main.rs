@@ -11,6 +11,7 @@ use bevy::asset::UnapprovedPathMode;
 use bevy::ecs::event::Trigger;
 use bevy::ecs::system::IntoResult;
 use bevy::math::Affine3A;
+use bevy::pbr::DefaultOpaqueRendererMethod;
 use bevy::picking::mesh_picking::ray_cast::SimplifiedMesh;
 use bevy::render::render_resource::{TextureDimension, TextureFormat};
 use naval_sketch::bevy_plugin::{argb_slice_to_color, place_part, BasePartMesh, NavalSketchPlugin};
@@ -288,18 +289,18 @@ fn setup(
     }
 
 
-    let mut light_transform = Transform::from_xyz(500.0, 500.0, 500.0);
+    let mut light_transform = Transform::from_xyz(5000000.0, 5000000.0, 5000000.0);
     light_transform = light_transform.looking_at(Vec3 {x:0.0, y:0.0, z:0.0 }, Vec3::Y);
     // light
     commands.spawn((
         DirectionalLight {
-            illuminance: 10000.0,
+            illuminance: 5000.0,
             shadows_enabled: true,
             ..default()
         },
         light_transform,
     ));
-    ambient_light.brightness = 2000.0;
+    ambient_light.brightness = 200.0;
 
 
     //commands.spawn();
@@ -392,11 +393,13 @@ fn main() {
             file_path,
             data_paths: data_paths.clone()
         })
+        .insert_resource(ClearColor(Color::srgba_u8(0,0,0,0)))
+        .insert_resource(DefaultOpaqueRendererMethod::deferred())
         .insert_resource(WireframeConfig {
             // The global wireframe config enables drawing of wireframes on every mesh,
             // except those with `NoWireframe`. Meshes with `Wireframe` will always have a wireframe,
             // regardless of the global configuration.
-            global: true,
+            global: false,
             // Controls the default color of all wireframes. Used as the default color for global wireframes.
             // Can be changed per mesh using the `WireframeColor` component.
             default_color: Color::WHITE,

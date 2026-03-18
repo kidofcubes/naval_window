@@ -3,7 +3,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::Aabb;
 // use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, MeshVertexAttribute, MeshVertexBufferLayoutRef, PrimitiveTopology, VertexFormat};
-use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPipeline, MaterialPipelineKey, OpaqueRendererMethod};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension, TextureFormat};
 use bevy::shader::{ShaderDefVal, ShaderRef};
@@ -22,7 +22,7 @@ const ATTRIBUTE_BLEND_COLOR: MeshVertexAttribute =
 pub struct WaterPlugin;
 impl Plugin for WaterPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<CustomMaterial>{
+        app.add_plugins(MaterialPlugin::<ExtendedMaterial<StandardMaterial, CustomMaterial>>{
             ..default()
         });
 
@@ -39,7 +39,8 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
-    mut custom_materials: ResMut<Assets<CustomMaterial>>,
+    // mut custom_materials: ResMut<Assets<CustomMaterial>>,
+    mut extended_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, CustomMaterial>>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut height_field_handle: ResMut<HeightFieldHandle>,
     water_sim_handles: Res<WaterSimulationHandles>,
@@ -81,21 +82,36 @@ fn setup(
     //     ..default()
     // });
 
+    let custom_material = CustomMaterial {
+        // color: LinearRgba::BLUE,
+        // color_texture: Some(asset_server.load("yuyuchonk.png")),
+        // alpha_mode: AlphaMode::Blend,
+        time: 0.0,
+        voxel_transform: Mat4::IDENTITY,
+        voxel_size: 0.5,
+        voxel_grid: null_texture(images.as_mut(), TextureDimension::D3, TextureFormat::R8Uint),
+        amplitude_texture: water_sim_handles.amplitude_texture_a.clone(),
+        profile_buffer: water_sim_handles.profile_buffer.clone(),
+    };
+
+    let material = ExtendedMaterial {
+        base: StandardMaterial {
+            // base_color: Color::srgb_u8(26, 100, 200),
+            base_color: Color::srgb_u8(7, 48, 71),
+            opaque_render_method: OpaqueRendererMethod::Deferred,
+            perceptual_roughness: 0.25,
+            reflectance: 0.4,
+            metallic: 0.0,
+            alpha_mode: AlphaMode::Opaque,
+            ..default()
+        },
+        extension: custom_material
+    };
 
 
     commands.spawn((
         Mesh3d(meshes.add(mesh)),
-        MeshMaterial3d(custom_materials.add(CustomMaterial {
-            // color: LinearRgba::BLUE,
-            // color_texture: Some(asset_server.load("yuyuchonk.png")),
-            // alpha_mode: AlphaMode::Blend,
-            time: 0.0,
-            voxel_transform: Mat4::IDENTITY,
-            voxel_size: 0.5,
-            voxel_grid: null_texture(images.as_mut(), TextureDimension::D3, TextureFormat::R8Uint),
-            amplitude_texture: water_sim_handles.amplitude_texture_a.clone(),
-            profile_buffer: water_sim_handles.profile_buffer.clone(),
-        })),
+        MeshMaterial3d(extended_materials.add(material)),
         // NoFrustumCulling,
         Transform::from_xyz(0.0, -100.0, 0.0),
         water_lod_mesh
@@ -104,7 +120,8 @@ fn setup(
 }
 
 fn update(
-    mut materials: ResMut<Assets<CustomMaterial>>,
+    // mut materials: ResMut<Assets<CustomMaterial>>,
+    mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, CustomMaterial>>>,
     mut build_data: ResMut<BuildData>,
     mut images: ResMut<Assets<Image>>,
     key: Res<ButtonInput<KeyCode>>,
@@ -117,11 +134,11 @@ fn update(
     sim_handles.flipped = !sim_handles.flipped;
     for (_, mut material) in materials.iter_mut() {
         // material.time = (time.elapsed().as_nanos() / (1000u128 * 1000u128 * 1000u128)) as f32;
-        material.time = (time.elapsed().as_millis() as f32 / 1000.0) as f32;
+        material.extension.time = (time.elapsed().as_millis() as f32 / 1000.0) as f32;
         if let Some(voxel_grid) = build_data.voxel_grid.as_ref() && key.just_pressed(KeyCode::KeyG) {
-            update_material(&mut material, voxel_grid, &mut images)
+            update_material(&mut material.extension, voxel_grid, &mut images)
         }
-        material.amplitude_texture = if sim_handles.flipped {
+        material.extension.amplitude_texture = if sim_handles.flipped {
             sim_handles.amplitude_texture_b.clone()
         } else {
             sim_handles.amplitude_texture_a.clone()
@@ -148,62 +165,77 @@ fn update_material(mut material: &mut CustomMaterial, voxel_grid: &VoxelGrid, im
 // This struct defines the data that will be passed to your shader
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct CustomMaterial {
-    #[uniform(0)]
+    #[uniform(100)]
     time: f32,
-    #[uniform(1)]
+    #[uniform(101)]
     voxel_transform: Mat4,
-    #[uniform(2)]
+    #[uniform(102)]
     voxel_size: f32,
-    #[texture(3, dimension = "3d", sample_type = "u_int")]
+    #[texture(103, dimension = "3d", sample_type = "u_int")]
     // #[sampler(3)]
     voxel_grid: Handle<Image>,
 
-    #[texture(9, dimension = "2d_array", sample_type = "float")]
-    #[sampler(10)]
+    #[texture(109, dimension = "2d_array", sample_type = "float")]
+    #[sampler(110)]
     amplitude_texture: Handle<Image>,
     
-    #[texture(11, dimension = "2d", sample_type = "float")]
+    #[texture(111, dimension = "2d", sample_type = "float")]
     profile_buffer: Handle<Image>,
 }
 
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.
 /// You only need to implement functions for features that need non-default behavior. See the Material api docs for details!
-impl Material for CustomMaterial {
+impl MaterialExtension for CustomMaterial {
     fn vertex_shader() -> ShaderRef {
         SHADER_ASSET_PATH.into()
     }
-    // fn prepass_vertex_shader() -> ShaderRef {
-    //     SHADER_ASSET_PATH.into()
-    // }
-    fn fragment_shader() -> ShaderRef {
+    fn prepass_vertex_shader() -> ShaderRef {
         SHADER_ASSET_PATH.into()
     }
 
-    fn specialize(
-        pipeline: &MaterialPipeline,
-        descriptor: &mut RenderPipelineDescriptor,
-        layout: &MeshVertexBufferLayoutRef,
-        key: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        if descriptor
-            .vertex
-            .shader_defs
-            .contains(&ShaderDefVal::Bool("PREPASS_PIPELINE".into(), true))
-        {
-            return Ok(());
-        }
-
-        let vertex_layout = layout.0.get_layout(&[
-            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
-
-            // ATTRIBUTE_BLEND_COLOR.at_shader_location(1),
-
-        ])?;
-        descriptor.vertex.buffers = vec![vertex_layout];
-        // descriptor.primitive.cull_mode = None;
-        Ok(())
+    fn deferred_vertex_shader() -> ShaderRef {
+        SHADER_ASSET_PATH.into()
     }
+
+    // fn fragment_shader() -> ShaderRef {
+    //     SHADER_ASSET_PATH.into()
+    // }
+    //
+    // fn prepass_fragment_shader() -> ShaderRef {
+    //     // SHADER_ASSET_PATH.into()
+    //     ShaderRef::Default
+    // }
+    //
+    // fn fragment_shader() -> ShaderRef {
+    //     // SHADER_ASSET_PATH.into()
+    //     ShaderRef::Default
+    // }
+
+    // fn specialize(
+    //     pipeline: &MaterialPipeline,
+    //     descriptor: &mut RenderPipelineDescriptor,
+    //     layout: &MeshVertexBufferLayoutRef,
+    //     key: MaterialPipelineKey<Self>,
+    // ) -> Result<(), SpecializedMeshPipelineError> {
+    //     if descriptor
+    //         .vertex
+    //         .shader_defs
+    //         .contains(&ShaderDefVal::Bool("PREPASS_PIPELINE".into(), true))
+    //     {
+    //         return Ok(());
+    //     }
+    //
+    //     let vertex_layout = layout.0.get_layout(&[
+    //         Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+    //         Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
+    //
+    //         // ATTRIBUTE_BLEND_COLOR.at_shader_location(1),
+    //
+    //     ])?;
+    //     descriptor.vertex.buffers = vec![vertex_layout];
+    //     // descriptor.primitive.cull_mode = None;
+    //     Ok(())
+    // }
 
     // fn alpha_mode(&self) -> AlphaMode {
     //     self.alpha_mode

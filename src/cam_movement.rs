@@ -1,5 +1,8 @@
 use bevy::{input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, pbr::ScreenSpaceAmbientOcclusion, prelude::*};
 use std::f32::consts::FRAC_PI_2;
+use bevy::anti_alias::fxaa::Fxaa;
+use bevy::core_pipeline::prepass::{DeferredPrepass, DepthPrepass, NormalPrepass};
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::picking::hover::HoverMap;
 
 /// A vector representing the player's input, accumulated over all frames that ran
@@ -71,6 +74,14 @@ pub fn spawn_player(mut commands: Commands) {
         PreviousPhysicalTranslation::default(),
         ScreenSpaceAmbientOcclusion::default(),
         EditorCamera,
+        DepthPrepass,
+        NormalPrepass,
+        DeferredPrepass,
+        Tonemapping::BlenderFilmic,
+        // Fxaa {
+        //     enabled: false,
+        //     ..default()
+        // }
         // GizmoCamera,
     ));
 }
