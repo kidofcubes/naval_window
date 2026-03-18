@@ -35,6 +35,7 @@ fn temp_test_update(
     hull_query: Query<(Entity, &BasePart, &mut AdjustableHull)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut build_data: ResMut<BuildData>,
+    mut light: Query<(Entity, &DirectionalLight)>,
     scenes: ResMut<Assets<Scene>>,
     parent_query: Query<&ChildOf>,
     base_part_query: Query<(Entity, &BasePart)>,
@@ -169,6 +170,11 @@ fn temp_test_update(
             // }
         }
     }
+    if(key.just_pressed(KeyCode::KeyL)){
+        let mut transform = transform_query.get_mut(light.single().unwrap().0).unwrap();
+        transform.translation = Vec3::new(25.0, 5.0, -20.5) * 10000.0;
+        transform.rotation = transform.looking_at(Vec3 {x:0.0, y:0.0, z:0.0 }, Vec3::Y).rotation;
+    }
 }
 
 
@@ -289,18 +295,21 @@ fn setup(
     }
 
 
-    let mut light_transform = Transform::from_xyz(5000000.0, 5000000.0, 5000000.0);
+    let mut light_transform = Transform::from_xyz(2500.0, 500.0, -2500.0);
     light_transform = light_transform.looking_at(Vec3 {x:0.0, y:0.0, z:0.0 }, Vec3::Y);
+    light_transform.translation = Vec3::new(25.0, 5.0, -20.5) * 10000.0;
+    light_transform.rotation = light_transform.looking_at(Vec3 {x:0.0, y:0.0, z:0.0 }, Vec3::Y).rotation;
     // light
     commands.spawn((
         DirectionalLight {
-            illuminance: 5000.0,
+            illuminance: 10000.0,
+            color: Color::srgb(1.0, 0.83, 0.71),
             shadows_enabled: true,
             ..default()
         },
         light_transform,
     ));
-    ambient_light.brightness = 200.0;
+    ambient_light.brightness = 10.0;
 
 
     //commands.spawn();

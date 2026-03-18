@@ -187,15 +187,15 @@ fn compute_normal(uv: vec2<f32>) -> vec3<f32> {
                 amplitude * profile.z
             );
             dhdx += amplitude * profile.w * k * dir.x;
-            dhdz += amplitude * profile.w * k * dir.y;
+            dhdz += amplitude * profile.w * k * dir.z;
         }
     }
-//    if((tx.x == 0.0 && tx.y == 0.0 && tx.z == 0.0)||(tz.x == 0.0 && tz.y == 0.0 && tz.z == 0.0)){
-//        return vec3<f32>(0.0,1.0,0.0);
-//    }
-
-//    return normalize(cross(tx,tz));
-    return normalize(vec3<f32>(-dhdx, 1.0, -dhdz));
+    if((tx.x == 0.0 && tx.y == 0.0 && tx.z == 0.0)||(tz.x == 0.0 && tz.y == 0.0 && tz.z == 0.0)){
+        return vec3<f32>(0.0,1.0,0.0);
+    }
+    var n = normalize(cross(tz,tx));
+    return select(-n, n, n.y > 0.0);
+//    return normalize(vec3<f32>(-dhdx, 1.0, -dhdz));
 }
 
 
@@ -225,6 +225,7 @@ fn translate_vertex(vertex: Vertex) -> VertexOutput {
         vec2<f32>((orig_world_position.x/1024.0)+0.5, (orig_world_position.z/1024.0)+0.5)
 //       vertex.uv
     ) * 1.0;
+//    offset = vec3<f32>(0.0,0.0,0.0);
 
     let position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);
 
@@ -260,15 +261,18 @@ fn fragment(
 //    pbr_input.material.base_color.b = 255;
 //#ifdef NORMAL_PREPASS
     var world_normal = compute_normal(vec2<f32>((in.world_position.x/1024.0)+0.5, (in.world_position.z/1024.0)+0.5));
+//    pbr_input.material.base_color.r = world_normal.x;
+//    pbr_input.material.base_color.g = world_normal.y;
+//    pbr_input.material.base_color.b = world_normal.z;
 //    world_normal = vec3<f32>(world_normal.z,world_normal.y,-world_normal.x);
 //    world_normal.y *= -1.0;
 //    world_normal = vec3<f32>(-1.0,-1.0,0.0);
     pbr_input.world_normal = world_normal;
-    pbr_input.N = normalize(
-        (view.view_from_world * vec4<f32>(world_normal, 0.0)).xyz
-    );
+//    pbr_input.N = normalize(
+//        (view.view_from_world * vec4<f32>(world_normal, 0.0)).xyz
+//    );
 //    pbr_input.N = vec3<f32>(0.0,1.0,0.0);
-//    pbr_input.N = world_normal;
+    pbr_input.N = world_normal;
 //#endif
 
     // generate a PbrInput struct from the StandardMaterial bindings

@@ -7,7 +7,7 @@ resolver = "2"
 [dependencies]
 naval_sketch = { path = "../naval_sketch/crates/naval_sketch", features = ["bevy"] }
 #bevy = { version = "0.18.0", features = ["dynamic_linking", "wayland", "dev", "hotpatching"]}
-bevy = { version = "0.18.0", features = ["dynamic_linking", "wayland", "dev", "hotpatching", "shader_format_wesl", "tonemapping_luts"]}
+bevy = { version = "0.18.0", features = ["dynamic_linking", "wayland", "dev", "hotpatching", "shader_format_wesl", "tonemapping_luts", "ktx2", "zstd_rust"]}
 #dioxus-devtools = "0.7.3" #included to fix the version because this is used in bevy's hotpatching
 #notify-debouncer-full = "^0.6.0"
 anyhow = {  version = "1.0.101" , features = ["backtrace"]}
