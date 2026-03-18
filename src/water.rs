@@ -186,16 +186,27 @@ pub struct CustomMaterial {
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.
 /// You only need to implement functions for features that need non-default behavior. See the Material api docs for details!
 impl MaterialExtension for CustomMaterial {
-    fn vertex_shader() -> ShaderRef {
-        SHADER_ASSET_PATH.into()
-    }
+    // fn vertex_shader() -> ShaderRef {
+    //     SHADER_ASSET_PATH.into()
+    // }
     fn prepass_vertex_shader() -> ShaderRef {
         SHADER_ASSET_PATH.into()
     }
-
     fn deferred_vertex_shader() -> ShaderRef {
         SHADER_ASSET_PATH.into()
     }
+
+    // fn fragment_shader() -> ShaderRef {
+    //     ShaderRef::Default
+    // }
+    fn deferred_fragment_shader() -> ShaderRef {
+        SHADER_ASSET_PATH.into()
+        // ShaderRef::Default
+    }
+    // fn prepass_fragment_shader() -> ShaderRef {
+    //     // SHADER_ASSET_PATH.into()
+    //     ShaderRef::Default
+    // }
 
     // fn fragment_shader() -> ShaderRef {
     //     SHADER_ASSET_PATH.into()

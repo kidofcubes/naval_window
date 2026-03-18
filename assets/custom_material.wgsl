@@ -1,25 +1,17 @@
-//#import bevy_pbr::forward_io::VertexOutput
 #import bevy_pbr::{mesh_functions::{get_world_from_local, mesh_position_local_to_clip, mesh_position_local_to_world}}
 
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::alpha_discard,
     view_transformations::position_world_to_clip,
+    mesh_view_bindings::view,
 }
 
 
-#ifdef PREPASS_PIPELINE
 #import bevy_pbr::{
     prepass_io::{Vertex, VertexOutput, FragmentOutput},
     pbr_deferred_functions::deferred_output,
 }
-#else
-#import bevy_pbr::{
-    forward_io::{Vertex, VertexOutput, FragmentOutput},
-    pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
-}
-#endif
-
 
 // we can import items from shader modules in the assets folder with a quoted path
 //#import "shaders/custom_material_import.wgsl"::COLOR_MULTIPLIER
@@ -67,6 +59,9 @@ const COLOR_MULTIPLIER: vec4<f32> = vec4<f32>(1.0, 1.0, 1.0, 0.5);
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var profile_buffer:     texture_2d<f32>;
 
 
+fn modulo_f32(x: f32, n: f32) -> f32{
+    return x - floor(x / n) * n;
+}
 
 // Hardware bilinear sample from amplitude texture array
 fn sample_amplitude(x: f32, z: f32, theta_index: u32, zeta_index: u32) -> f32 {
@@ -78,8 +73,17 @@ fn sample_amplitude(x: f32, z: f32, theta_index: u32, zeta_index: u32) -> f32 {
     return textureSampleLevel(amplitude_texture, amplitude_sampler, uv, layer, 0.0).x;
 }
 
-fn modulo_f32(x: f32, n: f32) -> f32{
-    return x - floor(x / n) * n;
+fn sample_profile(x: f32, z: f32, theta_index: u32, zeta_index: u32, period: f32, dir: vec2<f32>) -> vec4<f32>{
+    let position_offset = dot(vec2<f32>(x, z), dir) * GRID_SCALE;
+
+    // Profile buffer index (wrapping)
+    let profile_coord = position_offset + (DIRECTIONAL_OFFSETS[theta_index]/1.0);
+    let index = i32(
+        modulo_f32(f32(PROFILE_BUFFER_LENGTH) * (f32(profile_coord) / f32(period)), f32(PROFILE_BUFFER_LENGTH))
+    );
+
+    // Load profile value
+    return textureLoad(profile_buffer, vec2<i32>(index, i32(zeta_index)), 0);
 }
 
 // Calculate water surface offset at a given world position
@@ -110,22 +114,12 @@ fn calculate_water_offset(uv: vec2<f32>) -> vec3<f32> {
             // Sample amplitude at this position and direction
             let amplitude = sample_amplitude(real_x, real_z, theta_index, zeta_index);
 
-            // Position offset along wave direction
-            let position_offset = dot(vec2<f32>(real_x, real_z), vec2<f32>(dir.x, dir.z)) * GRID_SCALE;
-
-            // Profile buffer index (wrapping)
-            let profile_coord = position_offset + (DIRECTIONAL_OFFSETS[theta_index]/1.0);
-            let index = i32(
-                modulo_f32(f32(PROFILE_BUFFER_LENGTH) * (f32(profile_coord) / f32(period)), f32(PROFILE_BUFFER_LENGTH))
-            );
-
-            // Load profile value (cos component)
-            let cos_val = textureLoad(profile_buffer, vec2<i32>(index, i32(zeta_index)), 0) * direction_multiplier;
+            let profile = sample_profile(real_x, real_z, theta_index, zeta_index, period, vec2<f32>(dir.x,dir.z)) * direction_multiplier;
 
             // Height contribution
-            surface_offset.y += (amplitude * cos_val.y);
-            surface_offset.x += dir.x * (amplitude * cos_val.x);
-            surface_offset.z += dir.z * (amplitude * cos_val.x);
+            surface_offset.y += (amplitude * profile.y);
+            surface_offset.x += dir.x * (amplitude * profile.x);
+            surface_offset.z += dir.z * (amplitude * profile.x);
         }
     }
 //    return vec3<f32>(0.0,sample_amplitude(real_x,real_z,0,0),0.0);
@@ -151,6 +145,58 @@ fn calculate_water_offset(uv: vec2<f32>) -> vec3<f32> {
 //
 //    return normal;
 //}
+
+fn compute_normal(uv: vec2<f32>) -> vec3<f32> {
+//    return vec3<f32>(0.0,1.0,0.0);
+    if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0){
+        return vec3<f32>(0.0,1.0,0.0);
+    }
+    // Map UV coordinates to grid coordinates
+    let real_x = uv.x * f32(GRID_X_SIZE);
+    let real_z = uv.y * f32(GRID_Z_SIZE);
+
+//    var grad = vec2<f32>(0.0, 0.0);
+    var tx = vec3<f32>(0.0, 0.0, 0.0);
+    var tz = vec3<f32>(0.0, 0.0, 0.0);
+
+    var dhdx = 0.0;
+    var dhdz = 0.0;
+
+    let zeta_full_range = ZETA_MAX - ZETA_MIN;
+    for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
+        let min_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) - 0.0) / f32(TOTAL_ZETA_NUMBERS)));
+        let max_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 1.0) / f32(TOTAL_ZETA_NUMBERS)));
+        let period: f32 = f32(PERIODICITY) * pow(2,max_zeta);
+        let k        = (2.0 * 3.14159265) / period;  // wavenumber for this band
+
+        for (var theta_index: u32 = 0u; theta_index < DIRECTIONS; theta_index++) {
+            let theta = index_to_radians(theta_index);
+            let dir = vec3<f32>(cos(theta), 0.0, sin(theta));
+
+            let amplitude = sample_amplitude(real_x,real_z, theta_index, zeta_index);
+
+            let profile = sample_profile(real_x, real_z, theta_index, zeta_index, period, vec2<f32>(dir.x,dir.z));
+            tx += dir.x * vec3<f32>(
+                amplitude * profile.z,
+                amplitude * profile.w,
+                0.0
+            );
+            tz += dir.z * vec3<f32>(
+                0.0,
+                amplitude * profile.w,
+                amplitude * profile.z
+            );
+            dhdx += amplitude * profile.w * k * dir.x;
+            dhdz += amplitude * profile.w * k * dir.y;
+        }
+    }
+//    if((tx.x == 0.0 && tx.y == 0.0 && tx.z == 0.0)||(tz.x == 0.0 && tz.y == 0.0 && tz.z == 0.0)){
+//        return vec3<f32>(0.0,1.0,0.0);
+//    }
+
+//    return normalize(cross(tx,tz));
+    return normalize(vec3<f32>(-dhdx, 1.0, -dhdz));
+}
 
 
 //const PI = 3.1415926538;
@@ -189,42 +235,68 @@ fn translate_vertex(vertex: Vertex) -> VertexOutput {
 
     out.world_position = world_from_local * position;
     out.uv = vertex.uv;
+//    out.world_nonrmal = vec3(0.0,0.0,0.0);
+
+//#ifdef PREPASS_PIPELINE
+#ifdef NORMAL_PREPASS_OR_DEFERRED_PREPASS
+//    out.world_normal = vertex.normal;
+#endif
 
     return out;
 }
 
-//@fragment
-//fn fragment(
-//    in: VertexOutput,
-//    @builtin(front_facing) is_front: bool,
-//) -> FragmentOutput {
-//
-//    // generate a PbrInput struct from the StandardMaterial bindings
-//    var pbr_input = pbr_input_from_standard_material(in, is_front);
-//#ifdef PREPASS_PIPELINE
+//#ifdef DEFERRED_PREPASS
+//#ifdef NORMAL_PREPASS_OR_DEFERRED_PREPASS
+//#ifndef NORMAL_PREPASS_OR_DEFERRED_PREPASS
+//#ifdef FRAGMENT
+#ifdef PREPASS_FRAGMENT
+@fragment
+fn fragment(
+    in: VertexOutput,
+    @builtin(front_facing) is_front: bool,
+) -> FragmentOutput {
+    var out: FragmentOutput;
+    var pbr_input = pbr_input_from_standard_material(in, is_front);
+//    pbr_input.material.base_color.b = 255;
+//#ifdef NORMAL_PREPASS
+    var world_normal = compute_normal(vec2<f32>((in.world_position.x/1024.0)+0.5, (in.world_position.z/1024.0)+0.5));
+//    world_normal = vec3<f32>(world_normal.z,world_normal.y,-world_normal.x);
+//    world_normal.y *= -1.0;
+//    world_normal = vec3<f32>(-1.0,-1.0,0.0);
+    pbr_input.world_normal = world_normal;
+    pbr_input.N = normalize(
+        (view.view_from_world * vec4<f32>(world_normal, 0.0)).xyz
+    );
+//    pbr_input.N = vec3<f32>(0.0,1.0,0.0);
+//    pbr_input.N = world_normal;
+//#endif
+
+    // generate a PbrInput struct from the StandardMaterial bindings
+//#ifdef NORMAL_PREPASS_OR_DEFERRED_PREPASS
 //    pbr_input.world_normal = normalize(vec3(1.0,1.0,1.0));
-//    let out = deferred_output(in, pbr_input);
+    out = deferred_output(in, pbr_input);
 //#else
-//    var out: FragmentOutput;
 //    pbr_input.world_normal = normalize(vec3(1.0,1.0,1.0));
 //    out.color = apply_pbr_lighting(pbr_input);
 //    out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 //#endif
-//    return out;
-////
-////
-////    // Calculate per-pixel normal using finite differences
-//////    let normal = calculate_water_normal(input.world_position.xyz, input.uv);
-////
-////    var hull_distance = 1.0;
-////    hull_distance = get_ship_distance_approx(input.world_position.xyz);
-////    hull_distance = clamp(hull_distance, 0.0, 3.0)/3.0;
-////    var color = vec4<f32>(26/255.0, 100/255.0, 200/255.0, 1.0);
-////    color = color + (vec4<f32>(1.0) * (1.0-hull_distance));
-////    color = color + vec4<f32>(vec3<f32>(input.world_position.y/5.0), 1.0);
-////
-////    return color;
-//}
+    return out;
+
+//
+//
+//    // Calculate per-pixel normal using finite differences
+////    let normal = calculate_water_normal(input.world_position.xyz, input.uv);
+//
+//    var hull_distance = 1.0;
+//    hull_distance = get_ship_distance_approx(input.world_position.xyz);
+//    hull_distance = clamp(hull_distance, 0.0, 3.0)/3.0;
+//    var color = vec4<f32>(26/255.0, 100/255.0, 200/255.0, 1.0);
+//    color = color + (vec4<f32>(1.0) * (1.0-hull_distance));
+//    color = color + vec4<f32>(vec3<f32>(input.world_position.y/5.0), 1.0);
+//
+//    return color;
+}
+#endif
 
 
 fn get_ship_distance_approx(world_pos: vec3<f32>) -> f32 {
