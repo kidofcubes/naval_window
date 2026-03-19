@@ -96,8 +96,8 @@ fn calculate_water_offset(uv: vec2<f32>) -> vec3<f32> {
     let real_z = uv.y * f32(GRID_Z_SIZE);
 
     var surface_offset = vec3<f32>(0.0, 0.0, 0.0);
-    var tx = vec3<f32>(0.0, 0.0, 0.0);
-    var tz = vec3<f32>(0.0, 0.0, 0.0);
+//    var tx = vec3<f32>(0.0, 0.0, 0.0);
+//    var tz = vec3<f32>(0.0, 0.0, 0.0);
 
     let direction_multiplier = 1.0/f32(DIRECTIONS);
     let zeta_full_range = ZETA_MAX - ZETA_MIN;
@@ -198,6 +198,27 @@ fn compute_normal(uv: vec2<f32>) -> vec3<f32> {
 //    return normalize(vec3<f32>(-dhdx, 1.0, -dhdz));
 }
 
+// f0 for water is ~0.02 — the reflectance at normal incidence.
+// This is the physical value for an air/water interface.
+const WATER_F0: f32 = 0.02;
+
+// Deep ocean absorbs almost all light — this should be very close to black.
+// The tiny blue tint is the small amount of blue light that scatters back
+// before being absorbed.
+const DEEP_COLOR: vec3<f32>    = vec3<f32>(0.002, 0.006, 0.012);
+
+// At steep viewing angles you see slightly more scattering — still very dark,
+// just a touch more blue than the deep color. Not teal, not bright.
+const SHALLOW_COLOR: vec3<f32> = vec3<f32>(0.004, 0.012, 0.025);
+
+// ── Fresnel ──────────────────────────────────────────────────────────────────
+
+// Schlick approximation of the Fresnel equations.
+// cos_theta is dot(view_direction, surface_normal), clamped to [0,1].
+// Returns a value in [f0, 1.0] — higher at grazing angles.
+fn fresnel_schlick(cos_theta: f32, f0: f32) -> f32 {
+    return f0 + (1.0 - f0) * pow(saturate(1.0 - cos_theta), 5.0);
+}
 
 //const PI = 3.1415926538;
 //const TAU = PI * 2;
@@ -267,13 +288,51 @@ fn fragment(
 //    world_normal = vec3<f32>(world_normal.z,world_normal.y,-world_normal.x);
 //    world_normal.y *= -1.0;
 //    world_normal = vec3<f32>(-1.0,-1.0,0.0);
-    pbr_input.world_normal = world_normal;
-//    pbr_input.N = normalize(
-//        (view.view_from_world * vec4<f32>(world_normal, 0.0)).xyz
-//    );
+//    pbr_input.world_normal = world_normal;
+    pbr_input.N = normalize(
+        (view.view_from_world * vec4<f32>(world_normal, 0.0)).xyz
+    );
 //    pbr_input.N = vec3<f32>(0.0,1.0,0.0);
     pbr_input.N = world_normal;
 //#endif
+
+
+    // ── Fresnel ───────────────────────────────────────────────────────────────
+
+    // Reconstruct the view direction in world space.
+    // view.world_position is the camera's world-space position.
+    let view_dir_world = normalize(
+        view.world_position.xyz - in.world_position.xyz
+    );
+
+    // cos_theta: how directly the camera is looking at this fragment's surface.
+    // 1.0 = straight down, 0.0 = perfectly grazing.
+    let cos_theta = saturate(dot(world_normal, view_dir_world));
+
+    let fresnel = fresnel_schlick(cos_theta, WATER_F0);
+
+    // ── Base color blend ──────────────────────────────────────────────────────
+
+    // At grazing angles (fresnel → 1.0) the surface is highly reflective —
+    // the environment map handles that, so the base color should go dark.
+    // At steep angles (fresnel → 0.0) you see through into the water — use
+    // the shallow/deep water color.
+    //
+    // We set base_color to a blend driven by (1 - fresnel) so that:
+    //   - grazing angle → dark base (environment reflection dominates)
+    //   - steep angle   → water interior color visible
+    let water_color = mix(SHALLOW_COLOR, DEEP_COLOR, fresnel);
+
+    // Write the blended color as base_color. Bevy's PBR then mixes this
+    // with the environment map reflection via the reflectance / roughness
+    // parameters you already have set.
+    pbr_input.material.base_color = vec4<f32>(water_color, 1.0);
+
+    // Drive Bevy's own Fresnel/reflectance with the same factor so the
+    // specular highlight intensity also scales with viewing angle.
+    // perceptual_roughness and reflectance were set on the Rust material side
+    // and are already in pbr_input.material — no need to override them here
+    // unless you want to vary roughness across the surface (e.g. foam areas).
 
     // generate a PbrInput struct from the StandardMaterial bindings
 //#ifdef NORMAL_PREPASS_OR_DEFERRED_PREPASS
@@ -333,44 +392,4 @@ fn get_ship_distance_approx(world_pos: vec3<f32>) -> f32 {
 //    }
 
     return min_dist;
-}
-
-fn inverse(m: mat4x4f) -> mat4x4f {
-    let a00 = m[0][0]; let a01 = m[0][1]; let a02 = m[0][2]; let a03 = m[0][3];
-    let a10 = m[1][0]; let a11 = m[1][1]; let a12 = m[1][2]; let a13 = m[1][3];
-    let a20 = m[2][0]; let a21 = m[2][1]; let a22 = m[2][2]; let a23 = m[2][3];
-    let a30 = m[3][0]; let a31 = m[3][1]; let a32 = m[3][2]; let a33 = m[3][3];
-
-    let b00 = a00 * a11 - a01 * a10;
-    let b01 = a00 * a12 - a02 * a10;
-    let b02 = a00 * a13 - a03 * a10;
-    let b03 = a01 * a12 - a02 * a11;
-    let b04 = a01 * a13 - a03 * a11;
-    let b05 = a02 * a13 - a03 * a12;
-    let b06 = a20 * a31 - a21 * a30;
-    let b07 = a20 * a32 - a22 * a30;
-    let b08 = a20 * a33 - a23 * a30;
-    let b09 = a21 * a32 - a22 * a31;
-    let b10 = a21 * a33 - a23 * a31;
-    let b11 = a22 * a33 - a23 * a32;
-
-    let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
-
-    return mat4x4f(
-        a11 * b11 - a12 * b10 + a13 * b09,
-        a02 * b10 - a01 * b11 - a03 * b09,
-        a31 * b05 - a32 * b04 + a33 * b03,
-        a22 * b04 - a21 * b05 - a23 * b03,
-        a12 * b08 - a10 * b11 - a13 * b07,
-        a00 * b11 - a02 * b08 + a03 * b07,
-        a32 * b02 - a30 * b05 - a33 * b01,
-        a20 * b05 - a22 * b02 + a23 * b01,
-        a10 * b10 - a11 * b08 + a13 * b06,
-        a01 * b08 - a00 * b10 - a03 * b06,
-        a30 * b04 - a31 * b02 + a33 * b00,
-        a21 * b02 - a20 * b04 - a23 * b00,
-        a11 * b07 - a10 * b09 - a12 * b06,
-        a00 * b09 - a01 * b07 + a02 * b06,
-        a31 * b01 - a30 * b03 - a32 * b00,
-        a20 * b03 - a21 * b01 + a22 * b00) * (1 / det);
 }

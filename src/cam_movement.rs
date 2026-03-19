@@ -94,7 +94,7 @@ pub fn spawn_player(
         EnvironmentMapLight {
             diffuse_map:  asset_server.load("environment/kloppenheim_06_puresky_4k_diffuse.ktx2"),
             specular_map: asset_server.load("environment/kloppenheim_06_puresky_4k_specular.ktx2"),
-            intensity: 1500.0,
+            intensity: 500.0,
             ..default()
         },
         Skybox {

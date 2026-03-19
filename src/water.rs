@@ -97,7 +97,8 @@ fn setup(
     let material = ExtendedMaterial {
         base: StandardMaterial {
             // base_color: Color::srgb_u8(26, 100, 200),
-            base_color: Color::srgb_u8(7, 48, 71),
+            // base_color: Color::srgb_u8(7, 48, 71),
+            base_color: Color::srgb(0.003, 0.008, 0.015),
             opaque_render_method: OpaqueRendererMethod::Deferred,
             perceptual_roughness: 0.25,
             reflectance: 0.4,

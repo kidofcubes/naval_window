@@ -10,6 +10,7 @@ use std::ops::{Deref, DerefMut};
 use bevy::asset::UnapprovedPathMode;
 use bevy::ecs::event::Trigger;
 use bevy::ecs::system::IntoResult;
+use bevy::light::{CascadeShadowConfig, CascadeShadowConfigBuilder};
 use bevy::math::Affine3A;
 use bevy::pbr::DefaultOpaqueRendererMethod;
 use bevy::picking::mesh_picking::ray_cast::SimplifiedMesh;
@@ -302,14 +303,23 @@ fn setup(
     // light
     commands.spawn((
         DirectionalLight {
-            illuminance: 10000.0,
+            illuminance: 8000.0,
             color: Color::srgb(1.0, 0.83, 0.71),
             shadows_enabled: true,
+            // soft_shadow_size: None,
             ..default()
         },
+        CascadeShadowConfigBuilder {
+            maximum_distance: 8192.0,
+            // minimum_distance: 8.0,
+            // first_cascade_far_bound: 16.0,
+            num_cascades: 6,
+            // overlap_proportion: 0.05,
+            ..default()
+        }.build(),
         light_transform,
     ));
-    ambient_light.brightness = 10.0;
+    ambient_light.brightness = 00.0;
 
 
     //commands.spawn();

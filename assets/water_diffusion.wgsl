@@ -17,13 +17,13 @@
 @group(0) @binding(3) var<uniform> settings: WaterSettings;
 @group(0) @binding(4) var<uniform> water_wave_group_speeds: WaterWaveGroupSpeeds;
 
-fn sample_amplitude(x: u32, z: u32, theta_index: u32, wave_index: u32) -> vec2<f32> {
+fn sample_amplitude(x: u32, z: u32, theta_index: u32, wave_index: u32) -> f32 {
 //    if (x < 1.0 || x >= f32(GRID_X_SIZE - 1u) || z < 1.0 || z >= f32(GRID_Z_SIZE - 1u)) {
 //        return vec2<f32>(0.0, 0.0);
 //    }
     let uv = vec2<f32>((f32(x) + 0.5) / f32(GRID_X_SIZE), (f32(z) + 0.5) / f32(GRID_Z_SIZE));
     let layer = layer_index(theta_index, wave_index);
-    return textureSampleLevel(amplitude_in, amplitude_sampler, uv, layer, 0.0).xy;
+    return textureSampleLevel(amplitude_in, amplitude_sampler, uv, layer, 0.0).x;
 }
 
 fn wrap_direction(d: i32) -> u32 {
@@ -62,6 +62,6 @@ fn diffuse(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let new_amplitude = (1.0 - gamma) * amp_0 + gamma * 0.5 * (amp_m1 + amp_p1);
 
         // Write to output
-        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 1.0));
+        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 0.0, 0.0));
     }
 }
