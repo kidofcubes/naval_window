@@ -1,6 +1,7 @@
 use std::ops::Add;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::Aabb;
+use bevy::light::NotShadowCaster;
 // use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, MeshVertexAttribute, MeshVertexBufferLayoutRef, PrimitiveTopology, VertexFormat};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPipeline, MaterialPipelineKey, OpaqueRendererMethod};
@@ -115,7 +116,8 @@ fn setup(
         MeshMaterial3d(extended_materials.add(material)),
         // NoFrustumCulling,
         Transform::from_xyz(0.0, -100.0, 0.0),
-        water_lod_mesh
+        water_lod_mesh,
+        NotShadowCaster
     ));
     // commands.insert_resource(wake_sim);
 }

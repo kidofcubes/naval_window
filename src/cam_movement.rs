@@ -4,6 +4,7 @@ use bevy::anti_alias::fxaa::Fxaa;
 use bevy::core_pipeline::prepass::{DeferredPrepass, DepthPrepass, NormalPrepass};
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::pbr::ScreenSpaceReflections;
 use bevy::picking::hover::HoverMap;
 
 /// A vector representing the player's input, accumulated over all frames that ran
@@ -79,29 +80,34 @@ pub fn spawn_player(
         Name::new("Player"),
         Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
         (
-        AccumulatedInput::default(),
-        Velocity::default(),
-        PhysicalTranslation::default(),
-        PreviousPhysicalTranslation::default(),
+            AccumulatedInput::default(),
+            Velocity::default(),
+            PhysicalTranslation::default(),
+            PreviousPhysicalTranslation::default(),
         ),
-        ScreenSpaceAmbientOcclusion::default(),
+        (
+            ScreenSpaceAmbientOcclusion::default(),
+            ScreenSpaceReflections {
+                ..default()
+            },
+        ),
         EditorCamera,
         DepthPrepass,
         NormalPrepass,
         DeferredPrepass,
         Tonemapping::BlenderFilmic,
         (
-        EnvironmentMapLight {
-            diffuse_map:  asset_server.load("environment/kloppenheim_06_puresky_4k_diffuse.ktx2"),
-            specular_map: asset_server.load("environment/kloppenheim_06_puresky_4k_specular.ktx2"),
-            intensity: 500.0,
-            ..default()
-        },
-        Skybox {
-            image: asset_server.load("environment/kloppenheim_06_puresky_4k_cubemap.ktx2"),
-            brightness: 100.0,
-            ..default()
-        }
+            EnvironmentMapLight {
+                diffuse_map:  asset_server.load("environment/kloppenheim_06_puresky_4k_diffuse.ktx2"),
+                specular_map: asset_server.load("environment/kloppenheim_06_puresky_4k_specular.ktx2"),
+                intensity: 500.0,
+                ..default()
+            },
+            Skybox {
+                image: asset_server.load("environment/kloppenheim_06_puresky_4k_cubemap.ktx2"),
+                brightness: 100.0,
+                ..default()
+            }
         )
         // Fxaa {
         //     enabled: false,

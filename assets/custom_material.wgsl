@@ -321,7 +321,14 @@ fn fragment(
     // We set base_color to a blend driven by (1 - fresnel) so that:
     //   - grazing angle → dark base (environment reflection dominates)
     //   - steep angle   → water interior color visible
-    let water_color = mix(SHALLOW_COLOR, DEEP_COLOR, fresnel);
+    var water_color = mix(SHALLOW_COLOR, DEEP_COLOR, fresnel);
+
+    var hull_distance = 1.0;
+    hull_distance = get_ship_distance_approx(in.world_position.xyz);
+    hull_distance = clamp(hull_distance, 0.0, 3.0)/3.0;
+//    hull_distance = 0.0;
+    water_color = mix(vec3<f32>(1.0), water_color, hull_distance);
+
 
     // Write the blended color as base_color. Bevy's PBR then mixes this
     // with the environment map reflection via the reflectance / roughness
@@ -349,13 +356,7 @@ fn fragment(
 //
 //    // Calculate per-pixel normal using finite differences
 ////    let normal = calculate_water_normal(input.world_position.xyz, input.uv);
-//
-//    var hull_distance = 1.0;
-//    hull_distance = get_ship_distance_approx(input.world_position.xyz);
-//    hull_distance = clamp(hull_distance, 0.0, 3.0)/3.0;
-//    var color = vec4<f32>(26/255.0, 100/255.0, 200/255.0, 1.0);
-//    color = color + (vec4<f32>(1.0) * (1.0-hull_distance));
-//    color = color + vec4<f32>(vec3<f32>(input.world_position.y/5.0), 1.0);
+
 //
 //    return color;
 }
@@ -364,6 +365,8 @@ fn fragment(
 
 fn get_ship_distance_approx(world_pos: vec3<f32>) -> f32 {
     let voxel_pos = vec3<i32>((voxel_transform * vec4<f32>(world_pos, 1.0)).xyz);
+//    var voxel_pos = vec3<i32>(world_pos);
+//    voxel_pos.y += 3;
     let dims = vec3<i32>(textureDimensions(voxel_texture));
 
     if(voxel_pos.x < 0 || voxel_pos.x >= dims.x || voxel_pos.y < 0 || voxel_pos.y >= dims.y || voxel_pos.z < 0 || voxel_pos.z >= dims.z){
@@ -372,7 +375,7 @@ fn get_ship_distance_approx(world_pos: vec3<f32>) -> f32 {
 
     // Check if we're inside
     let center = textureLoad(voxel_texture, voxel_pos, 0).x;
-    if (center > 0u) {
+    if ((center & 2u)>0) { //boundary voxel
         return 0.0; // Inside ship
     }
 

@@ -12,8 +12,8 @@ use isosurface::marching_cubes::MarchingCubes;
 use rand::random_bool;
 
 /// Voxel bit flags
-pub const VOXEL_FILLED: u8 = 0b01;    // bit 0: filled flag (0 = empty, 1 = filled)
-pub const VOXEL_BOUNDARY: u8 = 0b10;  // bit 1: boundary flag (0 = not boundary, 1 = boundary)
+pub const VOXEL_FILLED: u8 =    0b00000001;    // bit 0: filled flag (0 = empty, 1 = filled)
+pub const VOXEL_BOUNDARY: u8 =  0b00000010;  // bit 1: boundary flag (0 = not boundary, 1 = boundary)
 
 /// Configuration for voxelization process
 #[derive(Debug, Clone)]
