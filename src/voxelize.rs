@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use bevy::app::ctrlc::Error::System;
 use bevy::asset::RenderAssetUsages;
+use bevy::audio::CpalSample;
 use bevy::prelude::*;
 use bevy::mesh::{Mesh, Indices, PrimitiveTopology, VertexAttributeValues, MeshVertexAttributeId, MeshVertexAttribute};
 use bevy::math::{Vec3A, Vec3Swizzles};
@@ -265,6 +266,51 @@ pub fn render_voxel_grid(grid: &VoxelGrid, gizmo: &mut Gizmos) {
     }
 }
 
+pub fn render_sdf(grid: &VoxelGrid, gizmo: &mut Gizmos) {
+    let voxel_size = grid.voxel_size;
+    let offset = grid.offset;
+
+    // Find max absolute SDF value for normalization
+    let max_dist = grid.sdf.iter().map(|v| v.abs()).fold(0.0f32, f32::max).max(1.0);
+
+    for z in 0..grid.dimensions.2 {
+        for y in 0..grid.dimensions.1 {
+            for x in 0..grid.dimensions.0 {
+                let idx = grid.get_index(x, y, z).unwrap();
+                let sdf_val = grid.sdf[idx];
+
+                // Only show voxels near the surface (within a few voxels)
+                if sdf_val.abs() > 2.0 {
+                    continue;
+                }
+
+                let world_pos = offset + Vec3A::new(
+                    (x as f32 + 0.5) * voxel_size,
+                    (y as f32 + 0.5) * voxel_size,
+                    (z as f32 + 0.5) * voxel_size,
+                );
+
+                let t = (sdf_val.abs() / 5.0).min(1.0);
+                let alpha = 0.4 * (1.0 - t); // fade out further from surface
+
+                let color = if sdf_val <= 0.0 {
+                    // Inside (negative): blue, brighter near surface
+                    Color::srgba(0.0, 0.2 * t, 1.0 - 0.5 * t, alpha)
+                } else {
+                    // Outside (positive): red, brighter near surface
+                    Color::srgba(1.0 - 0.5 * t, 0.2 * t, 0.0, alpha)
+                };
+
+                gizmo.cube(
+                    Transform::from_translation(world_pos.into())
+                        .with_scale(Vec3::splat(voxel_size * 0.95)),
+                    color,
+                );
+            }
+        }
+    }
+}
+
 pub fn mark_boundary_voxels_floodfill(grid: &mut VoxelGrid) {
     let outside_voxels: HashSet<usize> = HashSet::from_iter(grid.flood_fill(0,0,0, |voxel| {
         return (voxel & VOXEL_FILLED) == 0;
@@ -279,42 +325,62 @@ pub fn mark_boundary_voxels_floodfill(grid: &mut VoxelGrid) {
                     continue;
                 }
                 let mut is_boundary: bool = false;
-                is_boundary |= grid.get_index(x+1, y+0, z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
-                if(is_boundary){
-                    grid.set_boundary(x, y, z);
-                    count+=1;
-                    continue;
+                for x_offset in -1i32..=1 {
+                    for y_offset in -1i32..=1 {
+                        for z_offset in -1i32..=1 {
+                            if x_offset == 0 && y_offset == 0 && z_offset == 0 {
+                                continue;
+                            }
+                            if grid.get_index_bounds_check(x as i32 + x_offset, y as i32 + y_offset, z as i32 + z_offset).map(|i| outside_voxels.contains(&i)).unwrap_or(true) {
+                                grid.set_boundary(x, y, z);
+                                is_boundary = true;
+                                break;
+                            }
+                        }
+                        if is_boundary {
+                            break;
+                        }
+                    }
+                    if is_boundary {
+                        break;
+                    }
                 }
-                is_boundary |= grid.get_index(x.wrapping_sub(1), y+0, z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
-                if(is_boundary){
-                    grid.set_boundary(x, y, z);
-                    count+=1;
-                    continue;
-                }
-                is_boundary |= grid.get_index(x+0, y+1, z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
-                if(is_boundary){
-                    grid.set_boundary(x, y, z);
-                    count+=1;
-                    continue;
-                }
-                is_boundary |= grid.get_index(x+0, y.wrapping_sub(1), z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
-                if(is_boundary){
-                    grid.set_boundary(x, y, z);
-                    count+=1;
-                    continue;
-                }
-                is_boundary |= grid.get_index(x+0, y+0, z+1).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
-                if(is_boundary){
-                    grid.set_boundary(x, y, z);
-                    count+=1;
-                    continue;
-                }
-                is_boundary |= grid.get_index(x+0, y+0, z.wrapping_sub(1)).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
-                if(is_boundary){
-                    grid.set_boundary(x, y, z);
-                    count+=1;
-                    continue;
-                }
+                // is_boundary |= grid.get_index(x+1, y+0, z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                // if(is_boundary){
+                //     grid.set_boundary(x, y, z);
+                //     count+=1;
+                //     continue;
+                // }
+                // is_boundary |= grid.get_index(x.wrapping_sub(1), y+0, z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                // if(is_boundary){
+                //     grid.set_boundary(x, y, z);
+                //     count+=1;
+                //     continue;
+                // }
+                // is_boundary |= grid.get_index(x+0, y+1, z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                // if(is_boundary){
+                //     grid.set_boundary(x, y, z);
+                //     count+=1;
+                //     continue;
+                // }
+                // is_boundary |= grid.get_index(x+0, y.wrapping_sub(1), z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                // if(is_boundary){
+                //     grid.set_boundary(x, y, z);
+                //     count+=1;
+                //     continue;
+                // }
+                // is_boundary |= grid.get_index(x+0, y+0, z+1).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                // if(is_boundary){
+                //     grid.set_boundary(x, y, z);
+                //     count+=1;
+                //     continue;
+                // }
+                // is_boundary |= grid.get_index(x+0, y+0, z.wrapping_sub(1)).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                // if(is_boundary){
+                //     grid.set_boundary(x, y, z);
+                //     count+=1;
+                //     continue;
+                // }
             }
         }
     }

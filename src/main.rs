@@ -20,7 +20,7 @@ use naval_sketch::parsing::{load_save};
 use naval_sketch::parts::{AdjustableHull, BasePart, Part, PartRegistry};
 use naval_sketch::parts_loader::LocalPaths;
 use parry3d::transformation::vhacd::VHACDParameters;
-use crate::voxelize::{null_texture, render_voxel_grid, voxelize_meshes, VoxelGrid, VoxelizationConfig};
+use crate::voxelize::{null_texture, render_sdf, render_voxel_grid, voxelize_meshes, VoxelGrid, VoxelizationConfig};
 use crate::cam_movement::CameraMovementPlugin;
 use crate::mesh_optimize::{combine_meshes, convex_decomposition, get_boundary_mesh_conservative, simplify_mesh};
 use crate::water::{CustomMaterial, WaterPlugin};
@@ -114,6 +114,12 @@ fn temp_test_update(
         if let Some(voxel_grid) = &build_data.voxel_grid {
             render_voxel_grid(&voxel_grid, &mut gizmos);
             info!("kjasjfklajdfjd {}",voxel_grid.voxels.len());
+        }
+    }
+
+    if(key.pressed(KeyCode::KeyN)){
+        if let Some(voxel_grid) = &build_data.voxel_grid {
+            render_sdf(&voxel_grid, &mut gizmos);
         }
     }
 

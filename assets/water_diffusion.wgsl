@@ -60,6 +60,7 @@ fn diffuse(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         // Weighted average of magnitudes
         let new_amplitude = (1.0 - gamma) * amp_0 + gamma * 0.5 * (amp_m1 + amp_p1);
+//        let new_amplitude = amp_0;
 
         // Write to output
         textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 0.0, 0.0));

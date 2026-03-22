@@ -20,6 +20,7 @@
 @group(0) @binding(7) var sdf_texture: texture_3d<f32>;
 
 // Hardware bilinear sampling using sampler
+// takes in index coordinates
 fn sample_amplitude(x: f32, z: f32, theta_index: u32, wave_index: u32) -> f32 {
     // Boundary check - return zero outside valid range
     if (x < 1.0 || x >= f32(GRID_X_SIZE - 1u) || z < 1.0 || z >= f32(GRID_Z_SIZE - 1u)) {
@@ -35,9 +36,10 @@ fn sample_amplitude(x: f32, z: f32, theta_index: u32, wave_index: u32) -> f32 {
     return textureSampleLevel(amplitude_in, amplitude_sampler, uv, layer, 0.0).x;
 }
 
-// Transform water grid coordinates to world space
+// Transform water grid index coordinates to voxel index coordinates
 fn grid_to_voxel(grid_x: f32, grid_z: f32) -> vec3<f32> {
-    let grid_pos = vec4<f32>(grid_x, -1.11, grid_z, 1.0);
+    let grid_pos = vec4<f32>(grid_x, -0.0, grid_z, 1.0)/1.0;
+    //grid_x of 512.0 should become world x of 0.0, and then should become 2.0 voxel index of 2 (in voxel width length 4)
     return (voxel_settings.water_to_voxel * grid_pos).xyz;
 //    return (grid_pos).xyz;
 }
@@ -45,13 +47,14 @@ fn grid_to_voxel(grid_x: f32, grid_z: f32) -> vec3<f32> {
 // Check if a world position is inside a voxel boundary
 fn is_boundary(voxel_pos: vec3<f32>) -> bool {
     let dims = vec3<i32>(voxel_settings.grid_dims);
-    let voxel = vec3<i32>(voxel_pos);
+    var voxel = vec3<i32>(floor(voxel_pos));
 
     if (voxel.x < 0 || voxel.x >= dims.x ||
         voxel.y < 0 || voxel.y >= dims.y ||
         voxel.z < 0 || voxel.z >= dims.z) {
         return false;
     }
+//    voxel.x = 0;
 
     let val = textureLoad(voxel_texture, voxel, 0).x;
     return (val & 2u) != 0u;  // VOXEL_BOUNDARY = 0b10
@@ -64,7 +67,7 @@ fn sample_sdf(voxel_pos: vec3<f32>) -> f32 {
     if (voxel.x < 0 || voxel.x >= dims.x ||
         voxel.y < 0 || voxel.y >= dims.y ||
         voxel.z < 0 || voxel.z >= dims.z) {
-        return 1000.0; // large positive = far outside
+        return 1001.0; // large positive = far outside
     }
     return textureLoad(sdf_texture, voxel, 0).x;
 }
@@ -122,15 +125,18 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let prev_z = f32(z) - dz;
 
         // SDF-based reflection check
+        let prev_voxel_pos = grid_to_voxel(f32(prev_x), f32(prev_z));
         let voxel_pos = grid_to_voxel(f32(x), f32(z));
-        let sdf_val = sample_sdf(voxel_pos);
+        let sdf_val = sample_sdf(prev_voxel_pos);
         var new_amplitude: f32;
 
-        if (sdf_val < 2.0) {
+        if (sdf_val <= 1.0) {
+//        if (false) {
             // Near or inside boundary — reflect using SDF gradient
+//            let normal_3d = sdf_normal(prev_voxel_pos);
             let normal_3d = sdf_normal(voxel_pos);
             // Project to XZ plane for 2D wave reflection
-            let n_xz = normalize(vec2<f32>(normal_3d.x, normal_3d.z) + vec2<f32>(0.0001, 0.0));
+            let n_xz = normalize(vec2<f32>(normal_3d.x, normal_3d.z) + vec2<f32>(0.0000001, 0.0));
 
             // Current wave direction in 2D
             let d = vec2<f32>(cos(theta), sin(theta));
@@ -150,13 +156,24 @@ fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
             let reflected_amp = sample_amplitude(prev_r_x, prev_r_z, reflected_index, zeta_index);
             new_amplitude = reflected_amp * 0.9; // damping factor
+//            new_amplitude = 0.0;
         } else {
             // Normal advection - sample previous amplitude at current direction
             new_amplitude = sample_amplitude(prev_x, prev_z, theta_index, zeta_index);
         }
-        if (is_boundary(grid_to_voxel(f32(x), f32(z)))) {
-            new_amplitude = 1000.0;
+        if(sample_sdf(grid_to_voxel(f32(x),f32(z))) <= 1.0){
+            new_amplitude = 0.0;
         }
+//            new_amplitude = 0.0;
+//        if (is_boundary(grid_to_voxel(f32(x), f32(z)))) {
+//        if (is_boundary(voxel_pos)) {
+//            new_amplitude = 0.0;
+//        }
+//        if(voxel_pos.x < -0.0){
+//            new_amplitude = 1.0;
+//        }
+
+//            new_amplitude = 0.0;
 
         // Write to output
         textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 0.0, 1.0));

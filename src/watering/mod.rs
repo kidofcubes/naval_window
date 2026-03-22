@@ -347,7 +347,7 @@ pub struct WaterDebugSettings {
 /// Voxel grid settings for boundary detection in advection shader
 #[derive(Resource, ExtractResource, Clone, ShaderType)]
 pub struct VoxelSettings {
-    pub water_to_voxel: Mat4,  // Transform water grid coords to world space
+    pub water_to_voxel: Mat4,  // Transform water grid index coords to voxel index coords
     pub voxel_size: f32,       // Size of each voxel
     pub grid_dims: UVec3,      // Voxel grid dimensions
 }
@@ -388,6 +388,8 @@ fn setup_voxel_fallback(mut commands: Commands, mut images: ResMut<Assets<Image>
     // commands.insert_resource(VoxelGridHandle(handle));
 }
 
+//NOTES ABOUT COORDINATE INDEXES
+//NO NOTES
 fn sync_voxel_grid(
     build_data: Res<BuildData>,
     mut voxel_settings: ResMut<VoxelSettings>,
@@ -401,7 +403,7 @@ fn sync_voxel_grid(
         // voxel_settings.water_to_voxel = Mat4::from_translation((-grid.offset).into()).mul_mat4(&Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size))).mul_mat4(&Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)));
         // let grid_to_world = Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)).mul_mat4(&Mat4::from_scale(vec3(GRID_X_SIZE as f32/1000.0, 1.0, GRID_Z_SIZE as f32/1000.0)));
         // let grid_to_world = Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)).mul_mat4(&Mat4::from_scale(vec3(1000.0/GRID_X_SIZE as f32, 1.0, 1000.0/GRID_Z_SIZE as f32)));
-        let grid_to_world = Mat4::from_scale(vec3(GRID_SCALE as f32, GRID_SCALE as f32, GRID_SCALE as f32)).mul_mat4(&Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)));
+        let grid_to_world = Mat4::from_scale(Vec3::splat(GRID_SCALE)).mul_mat4(&Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)));
         // let grid_to_world = Mat4::from_scale(vec3(GRID_X_SIZE as f32/1000.0, 1.0, GRID_Z_SIZE as f32/1000.0)).mul_mat4(&Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)));
         // voxel_settings.water_to_voxel = grid_to_world;
         // voxel_settings.water_to_voxel = Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size)).mul_mat4(&Mat4::from_translation((-grid.offset).into())).mul_mat4(&grid_to_world);

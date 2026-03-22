@@ -158,7 +158,7 @@ struct WaterDebugSettings {
 }
 
 struct VoxelSettings {
-    water_to_voxel: mat4x4<f32>,  // Transform water grid to voxel
+    water_to_voxel: mat4x4<f32>,  // Transform water grid index to voxel index grid
     voxel_size: f32,
     grid_dims: vec3<u32>,
 }
@@ -224,3 +224,6 @@ fn inverse(m: mat4x4f) -> mat4x4f {
         a31 * b01 - a30 * b03 - a32 * b00,
         a20 * b03 - a21 * b01 + a22 * b00) * (1 / det);
 }
+
+///NOTE, IT IS THE RESPONSIBILITY OF THE SAMPLERS TO TRANSLATE INDEX COORDINATE SYSTEM TO ACTUAL SAMPLING FROM THE MIDDLE OF THE INDEXED PIXEL
+//I.E. A INDEX OF 1 IN A LENGTH 2 TEXTURE SHOULD TRANSLATE TO A UV OF 0.75
