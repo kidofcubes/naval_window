@@ -3,8 +3,11 @@
 //! This module provides functionality to convert iterators of meshes into
 //! solid voxel representations with customizable resolution and voxel size constraints.
 
+use std::collections::{HashMap, HashSet};
+use bevy::app::ctrlc::Error::System;
+use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
-use bevy::mesh::{Mesh, Indices, PrimitiveTopology, VertexAttributeValues};
+use bevy::mesh::{Mesh, Indices, PrimitiveTopology, VertexAttributeValues, MeshVertexAttributeId, MeshVertexAttribute};
 use bevy::math::{Vec3A, Vec3Swizzles};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use isosurface::source::Source;
@@ -78,9 +81,23 @@ impl VoxelGrid {
         }
     }
 
+    /// Get the linear index for a 3D coordinate
+    pub fn get_index_bounds_check(&self, x: i32, y: i32, z: i32) -> Option<usize> {
+        if x >= 0 && y >= 0 && z >= 0 && x < self.dimensions.0 as i32 && y < self.dimensions.1 as i32 && z < self.dimensions.2 as i32 {
+            Some(((z as u32 * self.dimensions.0 * self.dimensions.1) + (y as u32 * self.dimensions.0) + x as u32) as usize)
+        } else {
+            None
+        }
+    }
+
     /// Get the raw u8 value at the given coordinates
     pub fn get_voxel(&self, x: u32, y: u32, z: u32) -> Option<u8> {
         self.get_index(x, y, z).map(|index| self.voxels[index])
+    }
+
+    /// Get the raw u8 value at the given coordinates
+    pub fn get_voxel_bounds_check(&self, x: i32, y: i32, z: i32) -> Option<u8> {
+        self.get_index_bounds_check(x, y, z).map(|index| self.voxels[index])
     }
 
     /// Set a voxel filled flag at the given coordinates
@@ -115,6 +132,53 @@ impl VoxelGrid {
     /// Check if a voxel is a boundary voxel
     pub fn is_boundary(&self, x: u32, y: u32, z: u32) -> Option<bool> {
         self.get_index(x, y, z).map(|index| (self.voxels[index] & VOXEL_BOUNDARY) != 0)
+    }
+
+    /// Flood fill from a starting position, visiting all connected voxels matching `predicate`.
+    /// Returns a list of flat indices that were flooded.
+    /// Uses 6-connectivity (face neighbors only).
+    pub fn flood_fill(&self, start_x: u32, start_y: u32, start_z: u32, predicate: impl Fn(u8) -> bool) -> Vec<usize> {
+        let start_index = match self.get_index(start_x, start_y, start_z) {
+            Some(i) => i,
+            None => return Vec::new(),
+        };
+
+        if !predicate(self.voxels[start_index]) {
+            return Vec::new();
+        }
+
+        let mut visited = vec![false; self.voxels.len()];
+        let mut result = Vec::new();
+        let mut stack = vec![(start_x, start_y, start_z)];
+        visited[start_index] = true;
+
+        while let Some((x, y, z)) = stack.pop() {
+            result.push(self.get_index(x, y, z).unwrap());
+
+            let neighbors: [(i64, i64, i64); 6] = [
+                (x as i64 - 1, y as i64, z as i64),
+                (x as i64 + 1, y as i64, z as i64),
+                (x as i64, y as i64 - 1, z as i64),
+                (x as i64, y as i64 + 1, z as i64),
+                (x as i64, y as i64, z as i64 - 1),
+                (x as i64, y as i64, z as i64 + 1),
+            ];
+
+            for (nx, ny, nz) in neighbors {
+                if nx < 0 || ny < 0 || nz < 0 {
+                    continue;
+                }
+                let (nx, ny, nz) = (nx as u32, ny as u32, nz as u32);
+                if let Some(idx) = self.get_index(nx, ny, nz) {
+                    if !visited[idx] && predicate(self.voxels[idx]) {
+                        visited[idx] = true;
+                        stack.push((nx, ny, nz));
+                    }
+                }
+            }
+        }
+
+        result
     }
 }
 
@@ -171,6 +235,9 @@ pub fn render_voxel_grid(grid: &VoxelGrid, gizmo: &mut Gizmos) {
                 if !is_filled && !is_boundary {
                     continue;
                 }
+                if !is_boundary {
+                    continue;
+                }
 
                 let world_pos = offset + Vec3A::new(
                     (x as f32 + 0.5) * voxel_size,
@@ -219,6 +286,62 @@ pub fn render_voxel_grid(grid: &VoxelGrid, gizmo: &mut Gizmos) {
             gizmo.line(v2, v0, mesh_color);
         }
     }
+}
+
+pub fn mark_boundary_voxels_floodfill(grid: &mut VoxelGrid) {
+    let outside_voxels: HashSet<usize> = HashSet::from_iter(grid.flood_fill(0,0,0, |voxel| {
+        return (voxel & VOXEL_FILLED) == 0;
+    }));
+    println!("outside voxel length {:?}", outside_voxels.len());
+    println!("voxel length {:?}", grid.voxels.len());
+    let mut count = 0;
+    for x in 0..grid.dimensions.0 {
+        for y in 0..grid.dimensions.1 {
+            for z in 0..grid.dimensions.2 {
+                if !grid.is_filled(x, y, z).unwrap() {
+                    continue;
+                }
+                let mut is_boundary: bool = false;
+                is_boundary |= grid.get_index(x+1, y+0, z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                if(is_boundary){
+                    grid.set_boundary(x, y, z);
+                    count+=1;
+                    continue;
+                }
+                is_boundary |= grid.get_index(x.wrapping_sub(1), y+0, z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                if(is_boundary){
+                    grid.set_boundary(x, y, z);
+                    count+=1;
+                    continue;
+                }
+                is_boundary |= grid.get_index(x+0, y+1, z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                if(is_boundary){
+                    grid.set_boundary(x, y, z);
+                    count+=1;
+                    continue;
+                }
+                is_boundary |= grid.get_index(x+0, y.wrapping_sub(1), z+0).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                if(is_boundary){
+                    grid.set_boundary(x, y, z);
+                    count+=1;
+                    continue;
+                }
+                is_boundary |= grid.get_index(x+0, y+0, z+1).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                if(is_boundary){
+                    grid.set_boundary(x, y, z);
+                    count+=1;
+                    continue;
+                }
+                is_boundary |= grid.get_index(x+0, y+0, z.wrapping_sub(1)).map(|i| outside_voxels.contains(&i)).unwrap_or(true);
+                if(is_boundary){
+                    grid.set_boundary(x, y, z);
+                    count+=1;
+                    continue;
+                }
+            }
+        }
+    }
+    println!("boundary voxels length {:?}", count)
 }
 
 /// Mark boundary voxels using isosurface extraction
@@ -391,7 +514,8 @@ pub fn voxelize_meshes(
 
     // Step 4: Mark boundary voxels using isosurface extraction
     // mark_boundary_voxels(&mut grid);
-    mark_bordering_voxels_as_boundary(&mut grid);
+    // mark_bordering_voxels_as_boundary(&mut grid);
+    mark_boundary_voxels_floodfill(&mut grid);
 
     grid
 }
@@ -471,7 +595,7 @@ fn voxelize_triangle_conservative(grid: &mut VoxelGrid, v0: Vec3A, v1: Vec3A, v2
 }
 
 /// Triangle-box intersection test using separating axis theorem
-fn triangle_box_intersection(v0: Vec3A, v1: Vec3A, v2: Vec3A, box_center: Vec3A, box_half_size: f32) -> bool {
+pub(crate) fn triangle_box_intersection(v0: Vec3A, v1: Vec3A, v2: Vec3A, box_center: Vec3A, box_half_size: f32) -> bool {
     // Translate triangle to box space (box center at origin)
     let v0 = v0 - box_center;
     let v1 = v1 - box_center;
@@ -571,7 +695,7 @@ fn test_axis_cross(edge: Vec3A, v0: Vec3A, v1: Vec3A, v2: Vec3A, box_half: Vec3A
 }
 
 // Helper functions
-fn world_to_voxel(grid: &VoxelGrid, world_pos: Vec3A) -> IVec3 {
+pub fn world_to_voxel(grid: &VoxelGrid, world_pos: Vec3A) -> IVec3 {
     let local_pos = world_pos - grid.offset;
     IVec3::new(
         (local_pos.x / grid.voxel_size).floor() as i32,
@@ -580,7 +704,7 @@ fn world_to_voxel(grid: &VoxelGrid, world_pos: Vec3A) -> IVec3 {
     )
 }
 
-fn voxel_to_world(grid: &VoxelGrid, x: i32, y: i32, z: i32) -> Vec3A {
+pub fn voxel_to_world(grid: &VoxelGrid, x: i32, y: i32, z: i32) -> Vec3A {
     grid.offset
         + Vec3A::new(
         (x as f32 + 0.5) * grid.voxel_size,

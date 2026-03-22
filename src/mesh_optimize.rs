@@ -11,6 +11,7 @@ use meshopt::{simplify_sloppy, typed_to_bytes, VertexDataAdapter};
 use parry3d::shape::{SharedShape, ConvexPolyhedron};
 use parry3d::transformation::vhacd::VHACDParameters;
 use parry3d::math::Pose3;
+use crate::voxelize::{triangle_box_intersection, voxel_to_world, world_to_voxel, VoxelGrid, VOXEL_BOUNDARY};
 
 /// Vertex struct for meshopt processing
 #[repr(C)]
@@ -320,4 +321,369 @@ fn convex_polyhedron_to_mesh(
     mesh.compute_flat_normals();
 
     Ok(mesh)
+}
+
+
+pub fn get_boundary_mesh_conservative(grid: &VoxelGrid, mesh: Mesh, transform: &GlobalTransform) -> Option<Mesh>{
+    // Extract vertex positions
+    let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(VertexAttributeValues::Float32x3(positions)) => positions,
+        _ => return None,
+    };
+
+    // Extract indices
+    let indices: Vec<u32> = match mesh.indices() {
+        Some(Indices::U32(indices)) => indices.clone(),
+        Some(Indices::U16(indices)) => indices.iter().map(|&i| i as u32).collect(),
+        None => {
+            if mesh.primitive_topology() == PrimitiveTopology::TriangleList {
+                println!("Mesh has no indices!!!!!!!!!!!!!");
+                (0..positions.len() as u32).collect()
+            } else {
+                return None;
+            }
+        }
+    };
+    let mut to_keep_indices: Vec<u32> = Vec::with_capacity(indices.len());
+
+    // Process each triangle
+    for (i,triangle_indices) in indices.chunks(3).enumerate() {
+        if triangle_indices.len() != 3 {
+            continue;
+        }
+
+        let v0 = Vec3A::from(transform.transform_point(Vec3::from(
+            positions[triangle_indices[0] as usize],
+        )));
+        let v1 = Vec3A::from(transform.transform_point(Vec3::from(
+            positions[triangle_indices[1] as usize],
+        )));
+        let v2 = Vec3A::from(transform.transform_point(Vec3::from(
+            positions[triangle_indices[2] as usize],
+        )));
+
+        // if triangle_intersects_boundary(grid, v0, v1, v2) {
+        to_keep_indices.push(i as u32);
+        // }
+    }
+    // return Some(filter_mesh_triangles(&mesh, &to_keep_indices));
+    return Some(filter_mesh_triangles(&mesh, |a,b,c| {
+        let mut contains = 0;
+        for pos in [a,b,c] {
+            let pos = round_to_voxel(Vec3A::from(transform.transform_point(pos.into())) - grid.offset, grid.voxel_size);
+            if(near_voxel(grid, pos.0, pos.1, pos.2, 3, |voxel| { (voxel & VOXEL_BOUNDARY) != 0})){
+                contains+=1;
+            }
+        }
+        return contains >= 1;
+
+        // return triangle_intersects_boundary(grid, a.into(), b.into(), c.into());
+    }));
+}
+fn round_to_voxel(vec: Vec3A, voxel_size: f32) -> (i32, i32, i32) {
+    return ((vec.x / voxel_size).round() as i32, (vec.y / voxel_size).round() as i32, (vec.z / voxel_size).round() as i32)
+}
+
+fn near_voxel(grid: &VoxelGrid, x: i32, y: i32, z: i32, radius: i32, predicate: impl Fn(u8) -> bool) -> bool{
+    for x_offset in -radius as i32..radius as i32 {
+        for y_offset in -radius as i32..radius as i32 {
+            for z_offset in -radius as i32..radius as i32 {
+                if let Some(voxel) = grid.get_voxel_bounds_check(x + x_offset, y + y_offset, z + z_offset) {
+                    if predicate(voxel) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+fn triangle_intersects_boundary(grid: &VoxelGrid, v0: Vec3A, v1: Vec3A, v2: Vec3A) -> bool {
+    // Calculate triangle bounding box in voxel coordinates
+    let min_world = v0.min(v1).min(v2);
+    let max_world = v0.max(v1).max(v2);
+
+    let min_voxel = world_to_voxel(grid, min_world);
+    let max_voxel = world_to_voxel(grid, max_world);
+
+    // Clamp to grid bounds and add 1-voxel padding for safety
+    let start_x = (min_voxel.x - 1).max(0);
+    let start_y = (min_voxel.y - 1).max(0);
+    let start_z = (min_voxel.z - 1).max(0);
+    let end_x = (max_voxel.x + 2).min(grid.dimensions.0 as i32);
+    let end_y = (max_voxel.y + 2).min(grid.dimensions.1 as i32);
+    let end_z = (max_voxel.z + 2).min(grid.dimensions.2 as i32);
+
+    let half_size = grid.voxel_size * 0.5;
+
+    // Test each voxel in the bounding box
+    for z in start_z..end_z {
+        for y in start_y..end_y {
+            for x in start_x..end_x {
+                if let Some(boundary) = grid.is_boundary(x as u32, y as u32, z as u32){
+                    if(boundary){
+                        let voxel_center = voxel_to_world(grid, x, y, z);
+                        // Test if triangle intersects this voxel
+                        if triangle_box_intersection(v0, v1, v2, voxel_center, half_size) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+/// Rebuild `source` keeping only triangles for which `predicate` returns `true`.
+///
+/// # Arguments
+/// * `source`    — The original `Mesh`. Must use `TriangleList` topology.
+/// * `predicate` — Called once per triangle with its three vertex positions
+///                 (in the mesh's local space). Return `true` to keep the
+///                 triangle, `false` to discard it.
+///
+/// # Returns
+/// A new `Mesh` with the same vertex attributes as the source, but containing
+/// only the kept triangles. Unreferenced vertices are compacted out so the
+/// output vertex buffer contains no dead entries.
+///
+/// # Panics
+/// Panics if the mesh topology is not `TriangleList`, or if the mesh has no
+/// `ATTRIBUTE_POSITION` data.
+pub fn filter_mesh_triangles(
+    source:    &Mesh,
+    predicate: impl Fn(Vec3, Vec3, Vec3) -> bool,
+) -> Mesh {
+    assert_eq!(
+        source.primitive_topology(),
+        PrimitiveTopology::TriangleList,
+        "filter_mesh_triangles only supports TriangleList topology"
+    );
+
+    // ── Extract source positions ───────────────────────────────────────────
+
+    let positions = extract_positions(source);
+
+    // ── Build index list ───────────────────────────────────────────────────
+
+    // If the mesh has explicit indices, use them. If not (rare for real meshes
+    // but valid), synthesize sequential indices 0,1,2,3,… so the rest of the
+    // code is uniform.
+    let src_indices: Vec<u32> = match source.indices() {
+        Some(Indices::U32(v)) => v.clone(),
+        Some(Indices::U16(v)) => v.iter().map(|&i| i as u32).collect(),
+        None                  => (0..positions.len() as u32).collect(),
+    };
+
+    assert_eq!(
+        src_indices.len() % 3,
+        0,
+        "Index count is not a multiple of 3 — mesh is malformed"
+    );
+
+    // ── Filter triangles ───────────────────────────────────────────────────
+
+    // Collect the index triples for triangles that pass the predicate.
+    let kept_triples: Vec<[u32; 3]> = src_indices
+        .chunks_exact(3)
+        .filter_map(|tri| {
+            let [i0, i1, i2] = [tri[0], tri[1], tri[2]];
+            let a = positions[i0 as usize];
+            let b = positions[i1 as usize];
+            let c = positions[i2 as usize];
+            if predicate(a, b, c) { Some([i0, i1, i2]) } else { None }
+        })
+        .collect();
+
+    // ── Compact vertex buffer ──────────────────────────────────────────────
+
+    // Build a mapping from old vertex index → new compact index, only for
+    // vertices that are actually referenced by a kept triangle.
+    // Vertices referenced by no kept triangle are simply dropped.
+    let compact = build_compact_map(&kept_triples, positions.len());
+
+    // Remap triangle indices to the new compact space.
+    let new_indices: Vec<u32> = kept_triples
+        .iter()
+        .flat_map(|&[i0, i1, i2]| {
+            [
+                compact[i0 as usize],
+                compact[i1 as usize],
+                compact[i2 as usize],
+            ]
+        })
+        .collect();
+
+    // ── Assemble output mesh ───────────────────────────────────────────────
+
+    let mut out = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+
+    // Copy every vertex attribute from the source, compacting each one using
+    // the same old→new index map. This preserves normals, UVs, tangents, and
+    // any custom attributes without needing to know about them explicitly.
+    copy_compacted_attributes(source, &mut out, &compact);
+
+    out.insert_indices(Indices::U32(new_indices));
+
+    out
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Extract positions from the mesh as `Vec<Vec3>`.
+fn extract_positions(mesh: &Mesh) -> Vec<Vec3> {
+    match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(VertexAttributeValues::Float32x3(v)) => {
+            v.iter().map(|&[x, y, z]| Vec3::new(x, y, z)).collect()
+        }
+        _ => panic!("Mesh has no Float32x3 ATTRIBUTE_POSITION data"),
+    }
+}
+
+/// For each old vertex index, compute the new compact index it maps to.
+/// Vertices not referenced by any kept triangle get `u32::MAX` as a sentinel.
+fn build_compact_map(kept: &[[u32; 3]], vertex_count: usize) -> Vec<u32> {
+    // Mark which old indices are referenced.
+    let mut used = vec![false; vertex_count];
+    for &[i0, i1, i2] in kept {
+        used[i0 as usize] = true;
+        used[i1 as usize] = true;
+        used[i2 as usize] = true;
+    }
+
+    // Assign sequential new indices to referenced vertices.
+    let mut map     = vec![u32::MAX; vertex_count];
+    let mut next_id = 0u32;
+    for (old_idx, &is_used) in used.iter().enumerate() {
+        if is_used {
+            map[old_idx] = next_id;
+            next_id      += 1;
+        }
+    }
+    map
+}
+
+/// Copy all vertex attributes from `src` into `dst`, reordering/compacting
+/// each attribute array according to `compact_map` (old index → new index).
+///
+/// Vertices whose compact_map entry is `u32::MAX` are not emitted.
+fn copy_compacted_attributes(src: &Mesh, dst: &mut Mesh, compact_map: &[u32]) {
+    let new_count = compact_map.iter().filter(|&&v| v != u32::MAX).count();
+
+    for (attr_id, values) in src.attributes() {
+        match values {
+            VertexAttributeValues::Float32(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    compact_vec(v, compact_map, new_count, 0.0f32),
+                );
+            }
+            VertexAttributeValues::Float32x2(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    compact_vec(v, compact_map, new_count, [0.0f32; 2]),
+                );
+            }
+            VertexAttributeValues::Float32x3(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    compact_vec(v, compact_map, new_count, [0.0f32; 3]),
+                );
+            }
+            VertexAttributeValues::Float32x4(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    compact_vec(v, compact_map, new_count, [0.0f32; 4]),
+                );
+            }
+            VertexAttributeValues::Uint32(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    compact_vec(v, compact_map, new_count, 0u32),
+                );
+            }
+            VertexAttributeValues::Sint32(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    compact_vec(v, compact_map, new_count, 0i32),
+                );
+            }
+            VertexAttributeValues::Uint16x2(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    VertexAttributeValues::Uint16x2(compact_vec(v, compact_map, new_count, [0u16; 2])),
+                );
+            }
+            VertexAttributeValues::Uint16x4(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    VertexAttributeValues::Uint16x4(compact_vec(v, compact_map, new_count, [0u16; 4])),
+                );
+            }
+            VertexAttributeValues::Sint16x2(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    VertexAttributeValues::Sint16x2(compact_vec(v, compact_map, new_count, [0i16; 2])),
+                );
+            }
+            VertexAttributeValues::Sint16x4(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    VertexAttributeValues::Sint16x4(compact_vec(v, compact_map, new_count, [0i16; 4])),
+                );
+            }
+            VertexAttributeValues::Uint8x2(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    VertexAttributeValues::Uint8x2(compact_vec(v, compact_map, new_count, [0u8; 2])),
+                );
+            }
+            VertexAttributeValues::Uint8x4(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    VertexAttributeValues::Uint8x4(compact_vec(v, compact_map, new_count, [0u8; 4])),
+                );
+            }
+            VertexAttributeValues::Sint8x2(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    VertexAttributeValues::Sint8x2(compact_vec(v, compact_map, new_count, [0i8; 2])),
+                );
+            }
+            VertexAttributeValues::Sint8x4(v) => {
+                dst.insert_attribute(
+                    attr_id.clone(),
+                    VertexAttributeValues::Sint8x4(compact_vec(v, compact_map, new_count, [0i8; 4])),
+                );
+            }
+            other => {
+                warn!(
+                    "filter_mesh_triangles: skipping unhandled attribute {:?}",
+                    other
+                );
+            }
+        }
+    }
+}
+
+/// Generic compact helper — works for any `Copy + Default` element type.
+/// Scatters `src[old_idx]` into `out[new_idx]` for every mapped vertex.
+fn compact_vec<T: Copy>(
+    src:       &[T],
+    map:       &[u32],
+    new_count: usize,
+    default:   T,
+) -> Vec<T> {
+    let mut out = vec![default; new_count];
+    for (old_idx, &new_idx) in map.iter().enumerate() {
+        if new_idx != u32::MAX {
+            out[new_idx as usize] = src[old_idx];
+        }
+    }
+    out
 }

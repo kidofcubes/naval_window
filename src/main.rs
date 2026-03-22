@@ -22,7 +22,7 @@ use naval_sketch::parts_loader::LocalPaths;
 use parry3d::transformation::vhacd::VHACDParameters;
 use crate::voxelize::{null_texture, render_voxel_grid, voxelize_meshes, VoxelGrid, VoxelizationConfig};
 use crate::cam_movement::CameraMovementPlugin;
-use crate::mesh_optimize::{combine_meshes, convex_decomposition, simplify_mesh};
+use crate::mesh_optimize::{combine_meshes, convex_decomposition, get_boundary_mesh_conservative, simplify_mesh};
 use crate::water::{CustomMaterial, WaterPlugin};
 
 
@@ -122,9 +122,20 @@ fn temp_test_update(
         let combined_mesh = combine_meshes(&mesh_list).unwrap();
         println!("orig_tris {:?}",combined_mesh.count_vertices()/3);
         println!("indices {:?}",combined_mesh.indices().is_some());
+        let mut new_mesh: Option<Mesh> = None;
+
+        if let Some(voxel_grid) = &build_data.voxel_grid {
+            new_mesh = Some(simplify_mesh(&combined_mesh, 0.005).unwrap());
+            // println!("no culling new_mesh {:?}",new_mesh.unwrap().count_vertices()/3);
+
+            // new_mesh = get_boundary_mesh_conservative(voxel_grid, combined_mesh, &GlobalTransform::default());
+            // new_mesh = Some(simplify_mesh(&new_mesh.unwrap(), 0.01).unwrap());
+            // new_mesh = Some(combined_mesh);
+        }
 
 
-        let new_mesh = simplify_mesh(&combined_mesh, 0.001).unwrap();
+
+        // new_mesh = Some(simplify_mesh(&combined_mesh, 0.01).unwrap());
         // let new_meshes: Vec<Mesh> = convex_decomposition(&combined_mesh, Some(VHACDParameters {
         //     concavity: 0.0001,
         //     resolution: 512,
@@ -133,14 +144,16 @@ fn temp_test_update(
         // })).unwrap();
         // let new_meshes_with_transform = new_meshes.iter().map(|x| (x, &GlobalTransform::IDENTITY)).collect::<Vec<_>>();
         // let new_mesh = combine_meshes(&new_meshes_with_transform).unwrap();
-        println!("tris {:?}",new_mesh.count_vertices()/3);
+        if let Some(new_mesh) = new_mesh {
+            println!("tris {:?}",new_mesh.count_vertices()/3);
 
-        let mesh_entity = commands.spawn((
-            Mesh3d(meshes.add(new_mesh)),
-            MeshMaterial3d(materials.add(StandardMaterial::from_color(Color::srgba_u8(255,255,255,128)))),
-            Transform::from_xyz(0.0, 0.0, 0.0),
-        ));
-        build_data.simplified_mesh = Some(mesh_entity.id());
+            let mesh_entity = commands.spawn((
+                Mesh3d(meshes.add(new_mesh)),
+                MeshMaterial3d(materials.add(StandardMaterial::from_color(Color::srgba_u8(255,255,255,128)))),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ));
+            build_data.simplified_mesh = Some(mesh_entity.id());
+        }
 
         // build_data.root_ship_entity
     }
