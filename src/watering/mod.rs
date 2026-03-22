@@ -47,7 +47,8 @@ impl Plugin for Watering{
                 grid_dims: Default::default(),
             })
             .insert_resource(VoxelGridHandle {
-                0: None
+                voxel: None,
+                sdf: None,
             })
             .insert_resource(WaterWaveGroupSpeeds {
                 wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_ZETA_NUMBERS).iter().map(|x| vec4(*x * GRID_SCALE, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap()
@@ -366,9 +367,12 @@ impl Default for VoxelSettings {
     }
 }
 
-/// Handle to the voxel grid 3D texture
+/// Handle to the voxel grid 3D texture and SDF texture
 #[derive(Resource, ExtractResource, Clone)]
-pub struct VoxelGridHandle(pub Option<Handle<Image>>);
+pub struct VoxelGridHandle {
+    pub voxel: Option<Handle<Image>>,
+    pub sdf: Option<Handle<Image>>,
+}
 
 /// Handles to water simulation textures for use in materials
 #[derive(Resource, ExtractResource, Clone)]
@@ -397,7 +401,7 @@ fn sync_voxel_grid(
         // voxel_settings.water_to_voxel = Mat4::from_translation((-grid.offset).into()).mul_mat4(&Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size))).mul_mat4(&Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)));
         // let grid_to_world = Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)).mul_mat4(&Mat4::from_scale(vec3(GRID_X_SIZE as f32/1000.0, 1.0, GRID_Z_SIZE as f32/1000.0)));
         // let grid_to_world = Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)).mul_mat4(&Mat4::from_scale(vec3(1000.0/GRID_X_SIZE as f32, 1.0, 1000.0/GRID_Z_SIZE as f32)));
-        let grid_to_world = Mat4::from_scale(vec3(400.0/GRID_X_SIZE as f32, 1.0, 400.0/GRID_Z_SIZE as f32)).mul_mat4(&Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)));
+        let grid_to_world = Mat4::from_scale(vec3(GRID_SCALE as f32, GRID_SCALE as f32, GRID_SCALE as f32)).mul_mat4(&Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)));
         // let grid_to_world = Mat4::from_scale(vec3(GRID_X_SIZE as f32/1000.0, 1.0, GRID_Z_SIZE as f32/1000.0)).mul_mat4(&Mat4::from_translation(vec3(-(GRID_X_SIZE as f32)/2.0,0.0,-(GRID_Z_SIZE as f32)/2.0)));
         // voxel_settings.water_to_voxel = grid_to_world;
         // voxel_settings.water_to_voxel = Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size)).mul_mat4(&Mat4::from_translation((-grid.offset).into())).mul_mat4(&grid_to_world);
@@ -407,8 +411,9 @@ fn sync_voxel_grid(
         voxel_settings.water_to_voxel = Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size)).mul_mat4(&Mat4::from_translation((-grid.offset).into())).mul_mat4(&grid_to_world);
         // voxel_settings.water_to_voxel = grid_to_world;
         // voxel_settings.water_to_voxel = Mat4::IDENTITY;
-        if voxel_handle.0.is_none() {
-            voxel_handle.0 = Some(crate::voxelize::create_voxel_texture(grid, &mut images));
+        if voxel_handle.voxel.is_none() {
+            voxel_handle.voxel = Some(crate::voxelize::create_voxel_texture(grid, &mut images));
+            voxel_handle.sdf = Some(crate::voxelize::create_sdf_texture(grid, &mut images));
         }
     }
 }

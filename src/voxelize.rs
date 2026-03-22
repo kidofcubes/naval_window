@@ -50,10 +50,8 @@ pub struct VoxelGrid {
     pub offset: Vec3A,
     /// Size of each voxel in world units
     pub voxel_size: f32,
-    /// Boundary mesh vertices (in world space) from isosurface extraction
-    pub boundary_vertices: Option<Vec<Vec3A>>,
-    /// Boundary mesh indices (triangles)
-    pub boundary_indices: Option<Vec<u32>>,
+    /// Signed distance field: negative inside, positive outside, zero at boundary
+    pub sdf: Vec<f32>,
 }
 
 impl VoxelGrid {
@@ -67,8 +65,7 @@ impl VoxelGrid {
             dimensions,
             offset,
             voxel_size,
-            boundary_vertices: None,
-            boundary_indices: None,
+            sdf: vec![0.0; voxel_count],
         }
     }
 
@@ -266,26 +263,6 @@ pub fn render_voxel_grid(grid: &VoxelGrid, gizmo: &mut Gizmos) {
             }
         }
     }
-
-    // Render boundary mesh if it exists
-    if let (Some(vertices), Some(indices)) = (&grid.boundary_vertices, &grid.boundary_indices) {
-        let mesh_color = Color::srgba(0.0, 0.5, 1.0, 0.5); // Semi-transparent cyan
-
-        // Draw each triangle as wireframe lines
-        for tri in indices.chunks(3) {
-            if tri.len() != 3 || random_bool(0.95){
-                continue;
-            }
-            let v0: Vec3 = vertices[tri[0] as usize].into();
-            let v1: Vec3 = vertices[tri[1] as usize].into();
-            let v2: Vec3 = vertices[tri[2] as usize].into();
-
-            // Draw the three edges of the triangle
-            gizmo.line(v0, v1, mesh_color);
-            gizmo.line(v1, v2, mesh_color);
-            gizmo.line(v2, v0, mesh_color);
-        }
-    }
 }
 
 pub fn mark_boundary_voxels_floodfill(grid: &mut VoxelGrid) {
@@ -381,8 +358,8 @@ pub fn mark_boundary_voxels(grid: &mut VoxelGrid) {
     }
 
     // Store the boundary mesh in the grid
-    grid.boundary_vertices = Some(world_vertices);
-    grid.boundary_indices = Some(indices);
+    // grid.boundary_vertices = Some(world_vertices);
+    // grid.boundary_indices = Some(indices);
 }
 
 /// Mark voxels that intersect a boundary triangle
@@ -498,13 +475,15 @@ pub fn voxelize_meshes(
         (bounds_size.z / voxel_size).ceil() as u32,
     );
 
+    let voxel_count = (dimensions.0 * dimensions.1 * dimensions.2) as usize;
     let mut grid = VoxelGrid {
-        voxels: vec![0u8; (dimensions.0 * dimensions.1 * dimensions.2) as usize],
+        voxels: vec![0u8; voxel_count],
         dimensions,
         offset: min_bound,
         voxel_size,
-        boundary_vertices: None,
-        boundary_indices: None,
+        // boundary_vertices: None,
+        // boundary_indices: None,
+        sdf: vec![0.0; voxel_count],
     };
 
     // Step 3: Conservative voxelization - mark any voxel a triangle touches
@@ -516,8 +495,132 @@ pub fn voxelize_meshes(
     // mark_boundary_voxels(&mut grid);
     // mark_bordering_voxels_as_boundary(&mut grid);
     mark_boundary_voxels_floodfill(&mut grid);
+    compute_sdf(&mut grid);
 
     grid
+}
+
+/// Compute the signed distance field using Felzenszwalb-Huttenlocher 3D EDT.
+/// Boundary voxels are the zero-crossing; filled voxels get negative distances,
+/// empty voxels get positive distances. Distances are in voxel units.
+fn compute_sdf(grid: &mut VoxelGrid) {
+    let (w, h, d) = grid.dimensions;
+    let n = (w * h * d) as usize;
+    let max_dim = w.max(h).max(d) as usize;
+
+    // Initialize squared distances: boundary = 0, others = large sentinel
+    let sentinel = (w * w + h * h + d * d) as f32 + 1.0;
+    let mut sq_dist = vec![sentinel; n];
+
+    for i in 0..n {
+        if (grid.voxels[i] & VOXEL_BOUNDARY) != 0 {
+            sq_dist[i] = 0.0;
+        }
+    }
+
+    // Scratch buffers for 1D EDT (reused across all rows)
+    let mut f = vec![0.0f32; max_dim];
+    let mut z = vec![0.0f32; max_dim + 1];
+    let mut v = vec![0usize; max_dim];
+    let mut output = vec![0.0f32; max_dim];
+
+    // Pass 1: EDT along X axis
+    for zi in 0..d {
+        for yi in 0..h {
+            let row_start = (zi * w * h + yi * w) as usize;
+            for xi in 0..w as usize {
+                f[xi] = sq_dist[row_start + xi];
+            }
+            edt_1d(&f, w as usize, &mut v, &mut z, &mut output);
+            for xi in 0..w as usize {
+                sq_dist[row_start + xi] = output[xi];
+            }
+        }
+    }
+
+    // Pass 2: EDT along Y axis
+    for zi in 0..d {
+        for xi in 0..w {
+            // Gather column
+            for yi in 0..h as usize {
+                f[yi] = sq_dist[(zi * w * h + yi as u32 * w + xi) as usize];
+            }
+            edt_1d(&f, h as usize, &mut v, &mut z, &mut output);
+            // Scatter back
+            for yi in 0..h as usize {
+                sq_dist[(zi * w * h + yi as u32 * w + xi) as usize] = output[yi];
+            }
+        }
+    }
+
+    // Pass 3: EDT along Z axis
+    for yi in 0..h {
+        for xi in 0..w {
+            // Gather depth-line
+            for zi in 0..d as usize {
+                f[zi] = sq_dist[(zi as u32 * w * h + yi * w + xi) as usize];
+            }
+            edt_1d(&f, d as usize, &mut v, &mut z, &mut output);
+            // Scatter back
+            for zi in 0..d as usize {
+                sq_dist[(zi as u32 * w * h + yi * w + xi) as usize] = output[zi];
+            }
+        }
+    }
+
+    // Convert squared distances to signed distances
+    for i in 0..n {
+        let dist = sq_dist[i].sqrt();
+        grid.sdf[i] = if (grid.voxels[i] & VOXEL_FILLED) != 0 {
+            -dist
+        } else {
+            dist
+        };
+    }
+}
+
+/// 1D squared Euclidean distance transform using the Felzenszwalb-Huttenlocher algorithm.
+/// `f` contains the input values, `n` is the length.
+/// Result is written to `output`.
+fn edt_1d(f: &[f32], n: usize, v: &mut [usize], z: &mut [f32], output: &mut [f32]) {
+    if n == 0 {
+        return;
+    }
+    v[0] = 0;
+    z[0] = f32::NEG_INFINITY;
+    z[1] = f32::INFINITY;
+    let mut k = 0usize;
+
+    for q in 1..n {
+        loop {
+            let vk = v[k];
+            // Intersection of parabolas at v[k] and q
+            let s = ((f[q] + (q * q) as f32) - (f[vk] + (vk * vk) as f32))
+                / (2.0 * (q as f32 - vk as f32));
+            if s > z[k] {
+                k += 1;
+                v[k] = q;
+                z[k] = s;
+                z[k + 1] = f32::INFINITY;
+                break;
+            }
+            if k == 0 {
+                v[0] = q;
+                z[1] = f32::INFINITY;
+                break;
+            }
+            k -= 1;
+        }
+    }
+
+    k = 0;
+    for q in 0..n {
+        while z[k + 1] < q as f32 {
+            k += 1;
+        }
+        let diff = q as f32 - v[k] as f32;
+        output[q] = diff * diff + f[v[k]];
+    }
 }
 
 /// Conservative voxelization - marks voxel if triangle intersects it at all
@@ -747,6 +850,29 @@ pub fn create_voxel_texture(
 
     return images.add(image)
 }
+pub fn create_sdf_texture(
+    grid: &VoxelGrid,
+    images: &mut Assets<Image>,
+) -> Handle<Image> {
+    let (width, height, depth) = grid.dimensions;
+
+    // Convert f32 SDF values to bytes (little-endian)
+    let data: Vec<u8> = grid.sdf.iter().flat_map(|v| v.to_le_bytes()).collect();
+
+    let image = Image::new(
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: depth,
+        },
+        TextureDimension::D3,
+        data,
+        TextureFormat::R32Float,
+        Default::default(),
+    );
+    images.add(image)
+}
+
 pub fn null_texture(images: &mut Assets<Image>, dimension: TextureDimension, format: TextureFormat) -> Handle<Image> {
     let data: Vec<u8>;
     if let TextureFormat::R8Uint = format {

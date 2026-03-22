@@ -312,6 +312,7 @@ impl FromWorld for WaterPipelines {
                     texture_3d(bevy::render::render_resource::TextureSampleType::Uint),
                     uniform_buffer::<VoxelSettings>(false),
                     uniform_buffer::<WaterWaveGroupSpeeds>(false),
+                    texture_3d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),
                 ),
             ),
         );
@@ -473,9 +474,14 @@ pub fn queue_bind_groups(
     let Some(profile_buffer) = render_images.get(&sim_handle.profile_buffer) else { return };
 
     // Get the voxel grid texture
-    let Some(voxel_handle) = &voxel_handle.0 else { return };
-    let Some(voxel_gpu_image) = render_images.get(voxel_handle) else { return };
+    let Some(voxel_handle_inner) = &voxel_handle.voxel else { return };
+    let Some(voxel_gpu_image) = render_images.get(voxel_handle_inner) else { return };
     let voxel_texture_view = &voxel_gpu_image.texture_view;
+
+    // Get the SDF texture
+    let Some(sdf_handle) = &voxel_handle.sdf else { return };
+    let Some(sdf_gpu_image) = render_images.get(sdf_handle) else { return };
+    let sdf_texture_view = &sdf_gpu_image.texture_view;
 
     // This texture_view is the exact same texture the material will sample.
     // Use it as the compute shader's write target.
@@ -572,6 +578,7 @@ pub fn queue_bind_groups(
             voxel_texture_view,
             voxel_settings_buf.as_entire_binding(),
             water_wave_group_speeds_buf.as_entire_binding(),
+            sdf_texture_view,
         )),
     );
 
