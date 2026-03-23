@@ -17,6 +17,7 @@ isosurface = "0.0.4"
 meshopt = "0.6.2"
 parry3d = "0.26"
 glam = {  version = "0.32.0", features = ["encase"]}
+strum = { version = "0.28.0", features = ["derive"]}
 
 [target.x86_64-unknown-linux-gnu]
 linker = "/usr/bin/clang"
