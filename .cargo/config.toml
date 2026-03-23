@@ -1,0 +1,11 @@
+[target.x86_64-unknown-linux-gnu]
+#linker = "/usr/bin/clang"
+rustflags = [
+    #    "-C",
+    #    "link-arg=-fuse-ld=lld",
+#    "-Zembed-metadata=no",
+#    "-Z",
+#    "embed-metadata=no",
+    "-Z",
+    "threads=8"
+]

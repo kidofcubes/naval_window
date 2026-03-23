@@ -11,8 +11,6 @@ use bevy::prelude::*;
 use bevy::mesh::{Mesh, Indices, PrimitiveTopology, VertexAttributeValues, MeshVertexAttributeId, MeshVertexAttribute};
 use bevy::math::{Vec3A, Vec3Swizzles};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use isosurface::source::Source;
-use isosurface::marching_cubes::MarchingCubes;
 use rand::random_bool;
 
 /// Voxel bit flags
@@ -177,36 +175,6 @@ impl VoxelGrid {
         }
 
         result
-    }
-}
-
-/// Implement Source trait for isosurface extraction
-impl Source for VoxelGrid {
-    fn sample(&self, x: f32, y: f32, z: f32) -> f32 {
-        // Convert normalized [0,1] coords to voxel coords
-        let vx = (x * self.dimensions.0 as f32) as i32;
-        let vy = (y * self.dimensions.1 as f32) as i32;
-        let vz = (z * self.dimensions.2 as f32) as i32;
-
-        if (vx < 0 || vy < 0 || vz < 0 || vx >= self.dimensions.0 as i32 || vy >= self.dimensions.1 as i32 || vz >= self.dimensions.2 as i32) {
-            return 10.0;
-        }
-
-    // Clamp to valid range
-        let vx = (vx as u32).min(self.dimensions.0.saturating_sub(1));
-        let vy = (vy as u32).min(self.dimensions.1.saturating_sub(1));
-        let vz = (vz as u32).min(self.dimensions.2.saturating_sub(1));
-
-        // Return negative if filled (inside), positive if empty (outside)
-        if self.is_filled(vx, vy, vz).unwrap_or(false) {
-            // -1.0
-            // -1.5
-            -0.25 / 2.0
-        } else {
-            // 1.0
-            // 0.5
-            1.75 * 2.0
-        }
     }
 }
 
@@ -385,47 +353,6 @@ pub fn mark_boundary_voxels_floodfill(grid: &mut VoxelGrid) {
         }
     }
     println!("boundary voxels length {:?}", count)
-}
-
-/// Mark boundary voxels using isosurface extraction
-pub fn mark_boundary_voxels(grid: &mut VoxelGrid) {
-    let size = grid.dimensions.0.max(grid.dimensions.1).max(grid.dimensions.2) as usize;
-    let mut mc = MarchingCubes::new(size);
-
-    let mut vertices: Vec<f32> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    mc.extract(grid, &mut vertices, &mut indices);
-
-    // Convert all vertices from normalized [0,1] space to world space and store
-    let num_vertices = vertices.len() / 3;
-    let mut world_vertices: Vec<Vec3A> = Vec::with_capacity(num_vertices);
-    for i in 0..num_vertices {
-        let x = vertices[i * 3];
-        let y = vertices[i * 3 + 1];
-        let z = vertices[i * 3 + 2];
-        world_vertices.push(Vec3A::new(
-            grid.offset.x + x * (grid.dimensions.0 as f32) * grid.voxel_size,
-            grid.offset.y + y * (grid.dimensions.1 as f32) * grid.voxel_size,
-            grid.offset.z + z * (grid.dimensions.2 as f32) * grid.voxel_size,
-        ));
-    }
-
-    // For each triangle in the boundary mesh
-    for tri in indices.chunks(3) {
-        if tri.len() != 3 {
-            continue;
-        }
-        let v0 = world_vertices[tri[0] as usize];
-        let v1 = world_vertices[tri[1] as usize];
-        let v2 = world_vertices[tri[2] as usize];
-
-        // Mark voxels intersecting this triangle with VOXEL_BOUNDARY bit
-        mark_triangle_voxels_boundary(grid, v0, v1, v2);
-    }
-
-    // Store the boundary mesh in the grid
-    // grid.boundary_vertices = Some(world_vertices);
-    // grid.boundary_indices = Some(indices);
 }
 
 /// Mark voxels that intersect a boundary triangle

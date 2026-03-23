@@ -3,6 +3,7 @@ mod water;
 mod voxelize;
 mod watering;
 mod mesh_optimize;
+mod big_watering;
 
 use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, window::WindowResolution};
 use std::{env, path::{Path, PathBuf}};
@@ -19,10 +20,11 @@ use naval_sketch::bevy_plugin::{argb_slice_to_color, place_part, BasePartMesh, N
 use naval_sketch::parsing::{load_save};
 use naval_sketch::parts::{AdjustableHull, BasePart, Part, PartRegistry};
 use naval_sketch::parts_loader::LocalPaths;
-use parry3d::transformation::vhacd::VHACDParameters;
+// use parry3d::transformation::vhacd::VHACDParameters;
 use crate::voxelize::{null_texture, render_sdf, render_voxel_grid, voxelize_meshes, VoxelGrid, VoxelizationConfig};
 use crate::cam_movement::CameraMovementPlugin;
-use crate::mesh_optimize::{combine_meshes, convex_decomposition, get_boundary_mesh_conservative, simplify_mesh};
+use crate::mesh_optimize::{combine_meshes, get_boundary_mesh_conservative, simplify_mesh};
+use crate::big_watering::BigWatering;
 use crate::water::{CustomMaterial, WaterPlugin};
 
 
@@ -457,6 +459,7 @@ fn main() {
             WaterPlugin,
             CameraMovementPlugin,
             MeshPickingPlugin,
+            BigWatering,
             //OutlinePlugin,
         ))
         .add_systems(Startup, (setup).chain())
