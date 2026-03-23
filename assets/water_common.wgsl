@@ -7,16 +7,16 @@
 //const GRID_Z_SIZE: u32 = 256u;
 //const GRID_X_SIZE: u32 = 2048u;
 //const GRID_Z_SIZE: u32 = 2048u;
-const GRID_X_SIZE: u32 = 1024u;
-const GRID_Z_SIZE: u32 = 1024u;
+const GRID_X_SIZE: u32 = 256u;
+const GRID_Z_SIZE: u32 = 256u;
 
-const GRID_SCALE: f32 = 0.5;
+const GRID_SCALE: f32 = 1.0;
 
 const RENDER_X_SIZE: u32 = 64u;
 const RENDER_Z_SIZE: u32 = 64u;
 //const RENDER_X_SIZE: u32 = 2048u;
 //const RENDER_Z_SIZE: u32 = 2048u;
-const DIRECTIONS: u32 = 48u;
+const DIRECTIONS: u32 = 32u;
 const TOTAL_ZETA_NUMBERS: u32 = 4u;
 const PROFILE_BUFFER_LENGTH: u32 = 512u;
 //const PROFILE_BUFFER_LENGTH: u32 = 4096u;

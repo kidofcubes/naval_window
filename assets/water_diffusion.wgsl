@@ -31,7 +31,7 @@ fn wrap_direction(d: i32) -> u32 {
 }
 
 @compute @workgroup_size(32, 32, 1)
-fn diffuse(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let x = global_id.x;
     let z = global_id.y;
     let theta_index = global_id.z;

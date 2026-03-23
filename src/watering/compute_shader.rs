@@ -1,52 +1,20 @@
+use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph;
 use bevy::render::render_graph::{NodeRunError, RenderGraphContext, RenderLabel};
-use bevy::render::render_resource::{encase, AddressMode, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, DynamicUniformBuffer, Extent3d, FilterMode, PipelineCache, Sampler, SamplerDescriptor, ShaderStages, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
+use bevy::render::render_resource::{encase, AddressMode, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipeline, ComputePipelineDescriptor, DynamicUniformBuffer, Extent3d, FilterMode, IntoBindGroupLayoutEntryBuilderArray, PipelineCache, Sampler, SamplerDescriptor, ShaderStages, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
 use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, texture_3d, texture_storage_2d, texture_storage_2d_array, uniform_buffer};
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
-use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_ZETA_NUMBERS, WaterSimulationHandles};
-// use bevy::render::render_resource::encase::matrix::MatrixScalar;
-// use bevy::render::render_resource::encase::matrix::AsMutMatrixParts;
+use crate::watering::{VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_ZETA_NUMBERS, WaterSimulationHandles};
 
 // ─── GPU Resources ────────────────────────────────────────────────────────────
 
 /// to be put in render world
 #[derive(Resource)]
 pub struct WaterGpuResources {
-    // ── Amplitude ping-pong ────────────────────────────────────────────────
-    // Two Texture2DArrays, each with NUM_DIRECTIONS layers.
-    // Each layer stores A(x, y) for one propagation direction θ_d.
-    // We alternate read ↔ write each frame to avoid read-write hazards.
-    // pub amplitude_a:      Texture,
-    // pub amplitude_a_view: TextureView,
-    // pub amplitude_b:      Texture,
-    // pub amplitude_b_view: TextureView,
-    /// false → A is read, B is write.  true → B is read, A is write.
-    pub flip: bool,
-
-    // ── Amplitude sampler ──────────────────────────────────────────────────
-    // Linear filtering sampler for bilinear interpolation of amplitude textures.
-    pub amplitude_sampler: Sampler,
-
-    // ── Profile buffer ─────────────────────────────────────────────────────
-    // 1-D R32Float texture (stored as 1 × PROFILE_SIZE).
-    // Ψ(p) = integral_k  sqrt(S(k)) · cos(k·p) dk
-    // Written by the profile compute shader, read by height reconstruction.
-    pub profile_buf:      Texture,
-    pub profile_buf_view: TextureView,
-}
-
-impl WaterGpuResources {
-    // /// Return (read_view, write_view) for the current frame.
-    // pub fn amp_views(&self) -> (&TextureView, &TextureView) {
-    //     if self.flip {
-    //         (&self.amplitude_b_view, &self.amplitude_a_view)
-    //     } else {
-    //         (&self.amplitude_a_view, &self.amplitude_b_view)
-    //     }
-    // }
+    pub clamp_linear_sampler: Sampler,
 }
 
 
@@ -67,16 +35,6 @@ impl render_graph::Node for WaterSimulationNode {
         let pipelines      = world.resource::<WaterPipelines>();
         let Some(bgs)      = world.get_resource::<WaterBindGroups>() else { return Ok(()) };
 
-        // Fetch compiled pipelines — skip if any aren't ready yet.
-        let (Some(inj_pl), Some(adv_pl), Some(diff_pl), Some(prof_pl)) = (
-            pipeline_cache.get_compute_pipeline(pipelines.inject_id),
-            pipeline_cache.get_compute_pipeline(pipelines.advection_id),
-            pipeline_cache.get_compute_pipeline(pipelines.diffusion_id),
-            pipeline_cache.get_compute_pipeline(pipelines.profile_id),
-        ) else {
-            return Ok(());
-        };
-
         // ── Workgroup counts ───────────────────────────────────────────────
         // Each shader uses @workgroup_size(64, 64, 1) over the grid / profile.
         let wg_grid    = (GRID_X_SIZE.div_ceil(32) as u32, GRID_Z_SIZE.div_ceil(32) as u32, DIRECTIONS as u32);
@@ -84,62 +42,40 @@ impl render_graph::Node for WaterSimulationNode {
 
         let encoder = ctx.command_encoder();
 
-        // ── Pass 0 : Debug Injection ───────────────────────────────────────
-        // Inject amplitude at debug location (runs every frame, but shader
-        // checks the inject flag and early-outs if not active).
-        {
+        let to_run: Vec<Option<(String, &ComputePipeline, &BindGroup, (u32,u32,u32))>> =
+            vec![
+                ("inject", wg_grid),
+                ("water_advection", wg_grid),
+                ("water_diffusion", wg_grid),
+                ("water_profile", wg_profile),
+            ].into_iter().map( |(name, wg)| {
+                let pipeline = pipelines.passes.get(name).and_then(|x|  pipeline_cache.get_compute_pipeline(x.1));
+                pipeline.map(|pipeline| (
+                    name.to_owned().to_owned(),
+                    pipeline,
+                    wg
+                ))
+                .and_then(|(name, pipeline, wg)| {
+                    bgs.bind_groups.get(&name).map(|bg| (name, pipeline, bg, wg))
+                })
+            }).collect::<Vec<_>>();
+
+        for opt in to_run.iter() {
+            if(opt.is_none()){
+                return Ok(());
+            }
+        }
+        let to_run = to_run.into_iter().map(|x| x.unwrap()).collect::<Vec<_>>();
+
+        for (name, pipeline, bg, wg) in to_run {
             let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label:            Some("water_inject"),
+                label:            Some(&name),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(inj_pl);
-            pass.set_bind_group(0, &bgs.inject, &[]);
-            pass.dispatch_workgroups(wg_grid.0, wg_grid.1, wg_grid.2);
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, bg, &[]);
+            pass.dispatch_workgroups(wg.0, wg.1, wg.2);
         }
-
-        // ── Pass 1 : Advection ─────────────────────────────────────────────
-        // Semi-Lagrangian advection of A(x, y, θ_d).
-        // Dispatched once per direction in the Z dimension of the workgroup.
-        // Reads from amp_read, writes to amp_write.
-        {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label:            Some("water_advection"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(adv_pl);
-            pass.set_bind_group(0, &bgs.advection, &[]);
-            pass.dispatch_workgroups(wg_grid.0, wg_grid.1, wg_grid.2);
-        }
-
-        // ── Pass 2 : Diffusion ────────────────────────────────────────────
-        // Directional diffusion of A(x, y, θ_d) - spreads energy between adjacent directions.
-        // Reads from amp_write, writes back to amp_read.
-        {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label:            Some("water_diffusion"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(diff_pl);
-            pass.set_bind_group(0, &bgs.diffusion, &[]);
-            pass.dispatch_workgroups(wg_grid.0, wg_grid.1, wg_grid.2);
-        }
-
-        // ── Pass 3 : Profile buffer ────────────────────────────────────────
-        // Build Ψ(p) from the Phillips spectrum.
-        // Done after advection so height reconstruction uses an up-to-date profile.
-        {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label:            Some("water_profile"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(prof_pl);
-            pass.set_bind_group(0, &bgs.profile, &[]);
-            pass.dispatch_workgroups(wg_profile.0, wg_profile.1, wg_profile.2);
-        }
-
-        // Note: Height reconstruction is now done in the material vertex/fragment shaders
-        // They sample the amplitude textures directly and compute offsets per-vertex
-        // and normals per-pixel using the profile buffer.
 
         Ok(())
     }
@@ -157,35 +93,8 @@ pub fn prepare_gpu_resources(
     if existing.is_some() {
         return;
     }
-
-    // ── Amplitude arrays ───────────────────────────────────────────────────
-    let amp_desc = TextureDescriptor {
-        label:               None,
-        size:                Extent3d {
-            width:                 GRID_X_SIZE as u32,
-            height:                GRID_Z_SIZE as u32,
-            // indexed by (k*DIRECTIONS)+direction
-            depth_or_array_layers: (DIRECTIONS * TOTAL_ZETA_NUMBERS) as u32,
-        },
-        mip_level_count:     1,
-        sample_count:        1,
-        dimension:           TextureDimension::D2,
-        format:              TextureFormat::R32Float,
-        usage:               TextureUsages::STORAGE_BINDING | TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING,
-        view_formats:        &[],
-    };
-    let array_view_desc = TextureViewDescriptor {
-        dimension: Some(TextureViewDimension::D2Array),
-        ..default()
-    };
-
-    // let amplitude_a      = render_device.create_texture(&TextureDescriptor { label: Some("amp_a"), ..amp_desc });
-    // let amplitude_a_view = amplitude_a.create_view(&array_view_desc);
-    // let amplitude_b      = render_device.create_texture(&TextureDescriptor { label: Some("amp_b"), ..amp_desc });
-    // let amplitude_b_view = amplitude_b.create_view(&array_view_desc);
-
     // ── Amplitude sampler ─────────────────────────────────────────────────
-    let amplitude_sampler = render_device.create_sampler(&SamplerDescriptor {
+    let clamp_linear_sampler = render_device.create_sampler(&SamplerDescriptor {
         label:           Some("amplitude_sampler"),
         address_mode_u:  AddressMode::ClampToEdge,
         address_mode_v:  AddressMode::ClampToEdge,
@@ -193,236 +102,83 @@ pub fn prepare_gpu_resources(
         min_filter:      FilterMode::Linear,
         ..default()
     });
-
-    // ── Profile buffer ─────────────────────────────────────────────────────
-    let profile_buf = render_device.create_texture(&TextureDescriptor {
-        label:               Some("profile_buf"),
-        size:                Extent3d { width: PROFILE_BUFFER_LENGTH as u32, height: TOTAL_ZETA_NUMBERS as u32, depth_or_array_layers: 1 },
-        mip_level_count:     1,
-        sample_count:        1,
-        dimension:           TextureDimension::D2,
-        format:              TextureFormat::Rgba32Float,
-        usage:               TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-        view_formats:        &[],
-    });
-    let profile_buf_view = profile_buf.create_view(&TextureViewDescriptor::default());
-
-    // ── Height field ───────────────────────────────────────────────────────
-    let height_field = render_device.create_texture(&TextureDescriptor {
-        label:               Some("height_field"),
-        size:                Extent3d { width: RENDER_X_SIZE as u32, height: RENDER_Z_SIZE as u32, depth_or_array_layers: 1 },
-        mip_level_count:     1,
-        sample_count:        1,
-        dimension:           TextureDimension::D2,
-        format:              TextureFormat::Rgba32Float,
-        // TEXTURE_BINDING so the vertex shader can sample it via a sampler.
-        // COPY_SRC so you can readback for buoyancy if needed.
-        usage:               TextureUsages::STORAGE_BINDING
-            | TextureUsages::TEXTURE_BINDING
-            | TextureUsages::COPY_SRC,
-        view_formats:        &[],
-    });
-    let height_field_view = height_field.create_view(&TextureViewDescriptor::default());
-    let height_field_sampler = render_device.create_sampler(&SamplerDescriptor {
-        address_mode_u: AddressMode::Repeat,
-        address_mode_v: AddressMode::Repeat,
-        mag_filter:     FilterMode::Linear,
-        min_filter:     FilterMode::Linear,
-        ..default()
-    });
-
     commands.insert_resource(WaterGpuResources {
-        // amplitude_a,
-        // amplitude_a_view,
-        // amplitude_b,
-        // amplitude_b_view,
-        flip: false,
-        amplitude_sampler,
-        profile_buf,
-        profile_buf_view,
+        clamp_linear_sampler,
     });
 }
 
 // ─── Pipeline Resource ────────────────────────────────────────────────────────
 
+/// Creates a `(BindGroupLayoutDescriptor, CachedComputePipelineId)` pair.
+///
+/// `$label` is used as the pipeline label and `"$label.wgsl"` as the shader path.
+/// Entry point is always `"main"`.
+/// `$entries` is the tuple passed to `BindGroupLayoutEntries::sequential`.
+macro_rules! compute_pipeline {
+    ($passes_map:expr, $label:expr, $asset_server:expr, $pipeline_cache:expr, $entries:expr) => {{
+        let layout = BindGroupLayoutDescriptor::new(
+            concat!($label, "_layout"),
+            &BindGroupLayoutEntries::sequential(ShaderStages::COMPUTE, $entries),
+        );
+        let id = $pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label:                           Some(($label).into()),
+            layout:                          vec![layout.clone()],
+            push_constant_ranges:            vec![],
+            shader:                          $asset_server.load(concat!($label, ".wgsl")),
+            shader_defs:                     vec![],
+            entry_point:                     Some("main".into()),
+            zero_initialize_workgroup_memory: false,
+        });
+        $passes_map.insert(layout, id);
+    }};
+}
+
 /// Holds all compute pipelines and their shared bind group layouts.
 #[derive(Resource)]
 pub struct WaterPipelines {
-    // ── Layouts ────────────────────────────────────────────────────────────
-    pub inject_layout:    BindGroupLayoutDescriptor,
-    pub advection_layout: BindGroupLayoutDescriptor,
-    pub diffusion_layout: BindGroupLayoutDescriptor,
-    pub profile_layout:   BindGroupLayoutDescriptor,
-
-    // ── Cached pipeline IDs ────────────────────────────────────────────────
-    /// Pass 0 – debug amplitude injection (optional, runs when inject flag is set).
-    pub inject_id:    CachedComputePipelineId,
-    /// Pass 1 – semi-Lagrangian advection of A(x, y, θ).
-    pub advection_id: CachedComputePipelineId,
-    /// Pass 2 – directional diffusion of A(x, y, θ).
-    pub diffusion_id: CachedComputePipelineId,
-    /// Pass 3 – build the 1-D profile buffer Ψ(p) from the Phillips spectrum.
-    pub profile_id:   CachedComputePipelineId,
+    pub passes: HashMap<String, (BindGroupLayoutDescriptor, CachedComputePipelineId)>,
 }
 
 impl FromWorld for WaterPipelines {
     fn from_world(world: &mut World) -> Self {
-        let device        = world.resource::<RenderDevice>();
+        let mut passes = HashMap::new();
+
+        // let device        = world.resource::<RenderDevice>();
         let asset_server  = world.resource::<AssetServer>();
         let pipeline_cache = world.resource::<PipelineCache>();
 
-        // ── Inject layout ─────────────────────────────────────────────────
-        // Binding 0 : amplitude_out (Texture2DArray, ReadWrite storage)
-        // Binding 1 : settings      (Uniform buffer)
-        // Binding 2 : debug_settings (Uniform buffer)
-        let inject_layout = BindGroupLayoutDescriptor::new(
-            "inject_layout",
-            &BindGroupLayoutEntries::sequential(
-                ShaderStages::COMPUTE,
-                (
-                    texture_storage_2d_array(
-                        TextureFormat::R32Float,
-                        StorageTextureAccess::ReadWrite,
-                    ),
-                    uniform_buffer::<WaterSettings>(false),
-                    uniform_buffer::<WaterDebugSettings>(false),
-                ),
-            ),
-        );
+        compute_pipeline!(passes, "water_inject", asset_server, pipeline_cache, (
+            texture_storage_2d_array(TextureFormat::R32Float, StorageTextureAccess::ReadWrite),
+            uniform_buffer::<WaterSettings>(false),
+            uniform_buffer::<WaterDebugSettings>(false),
+        ));
 
-        // ── Advection layout ───────────────────────────────────────────────
-        // Binding 0 : amplitude_in  (Texture2DArray, sampled)
-        // Binding 1 : amplitude_sampler (Sampler)
-        // Binding 2 : amplitude_out (Texture2DArray, WriteOnly storage)
-        // Binding 3 : settings      (Uniform buffer)
-        // Binding 4 : voxel_texture (Texture3D, Uint)
-        // Binding 5 : voxel_settings (Uniform buffer)
-        let advection_layout = BindGroupLayoutDescriptor::new(
-            "advection_layout",
-            &BindGroupLayoutEntries::sequential(
-                ShaderStages::COMPUTE,
-                (
-                    texture_2d_array(bevy::render::render_resource::TextureSampleType::Float { filterable: true }),
-                    sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
-                    texture_storage_2d_array(
-                        TextureFormat::R32Float,
-                        StorageTextureAccess::WriteOnly,
-                    ),
-                    uniform_buffer::<WaterSettings>(false),
-                    texture_3d(bevy::render::render_resource::TextureSampleType::Uint),
-                    uniform_buffer::<VoxelSettings>(false),
-                    uniform_buffer::<WaterWaveGroupSpeeds>(false),
-                    texture_3d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),
-                ),
-            ),
-        );
+        compute_pipeline!(passes, "water_advection", asset_server, pipeline_cache, (
+            texture_2d_array(bevy::render::render_resource::TextureSampleType::Float { filterable: true }),
+            sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
+            texture_storage_2d_array(TextureFormat::R32Float, StorageTextureAccess::WriteOnly),
+            uniform_buffer::<WaterSettings>(false),
+            texture_3d(bevy::render::render_resource::TextureSampleType::Uint),
+            uniform_buffer::<VoxelSettings>(false),
+            uniform_buffer::<WaterWaveGroupSpeeds>(false),
+            texture_3d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),
+        ));
 
-        // ── Diffusion layout ──────────────────────────────────────────────────
-        // Binding 0 : amplitude_in  (Texture2DArray, sampled)
-        // Binding 1 : amplitude_sampler (Sampler)
-        // Binding 2 : amplitude_out (Texture2DArray, WriteOnly storage)
-        // Binding 3 : settings      (Uniform buffer)
-        let diffusion_layout = BindGroupLayoutDescriptor::new(
-            "diffusion_layout",
-            &BindGroupLayoutEntries::sequential(
-                ShaderStages::COMPUTE,
-                (
-                    texture_2d_array(bevy::render::render_resource::TextureSampleType::Float { filterable: true }),
-                    sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
-                    texture_storage_2d_array(
-                        TextureFormat::R32Float,
-                        StorageTextureAccess::WriteOnly,
-                    ),
-                    uniform_buffer::<WaterSettings>(false),
-                    uniform_buffer::<WaterWaveGroupSpeeds>(false),
-                ),
-            ),
-        );
+        compute_pipeline!(passes, "water_diffusion", asset_server, pipeline_cache, (
+            texture_2d_array(bevy::render::render_resource::TextureSampleType::Float { filterable: true }),
+            sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
+            texture_storage_2d_array(TextureFormat::R32Float, StorageTextureAccess::WriteOnly),
+            uniform_buffer::<WaterSettings>(false),
+            uniform_buffer::<WaterWaveGroupSpeeds>(false),
+        ));
 
-        // ── Profile layout ─────────────────────────────────────────────────
-        // Binding 0 : profile_out (Texture2D 1×N, WriteOnly)
-        // Binding 1 : settings    (Uniform)
-        let profile_layout = BindGroupLayoutDescriptor::new(
-            "profile_layout",
-            &BindGroupLayoutEntries::sequential(
-                ShaderStages::COMPUTE,
-                (
-                    texture_storage_2d(
-                        TextureFormat::Rgba32Float,
-                        StorageTextureAccess::WriteOnly,
-                    ),
-                    uniform_buffer::<WaterSettings>(false),
-                ),
-            ),
-        );
-
-        // ── Load shaders ───────────────────────────────────────────────────
-        let inject_shader  = asset_server.load("water_inject.wgsl");
-        let adv_shader     = asset_server.load("water_advection.wgsl");
-        let diffusion_shader = asset_server.load("water_diffusion.wgsl");
-        let profile_shader = asset_server.load("water_profile.wgsl");
-        // let height_shader  = asset_server.load("water_height.wgsl");
-
-        // ── Queue pipelines ────────────────────────────────────────────────
-        let inject_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label:                        Some("water_inject".into()),
-            layout:                       vec![inject_layout.clone()],
-            push_constant_ranges:         vec![],
-            shader:                       inject_shader,
-            shader_defs:                  vec![],
-            entry_point:                  Some("inject_amplitude".into()),
-            zero_initialize_workgroup_memory: false,
-        });
-
-        let advection_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label:                        Some("water_advection".into()),
-            layout:                       vec![advection_layout.clone()],
-            push_constant_ranges:         vec![],
-            shader:                       adv_shader,
-            shader_defs:                  vec![],
-            entry_point:                  Some("advect".into()),
-            zero_initialize_workgroup_memory: false,
-        });
-
-        let diffusion_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label:                        Some("water_diffusion".into()),
-            layout:                       vec![diffusion_layout.clone()],
-            push_constant_ranges:         vec![],
-            shader:                       diffusion_shader,
-            shader_defs:                  vec![],
-            entry_point:                  Some("diffuse".into()),
-            zero_initialize_workgroup_memory: false,
-        });
-
-        let profile_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label:                        Some("water_profile".into()),
-            layout:                       vec![profile_layout.clone()],
-            push_constant_ranges:         vec![],
-            shader:                       profile_shader,
-            shader_defs:                  vec![],
-            entry_point:                  Some("build_profile".into()),
-            zero_initialize_workgroup_memory: false,
-        });
-
-        let height_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label:                        None,
-            layout:                       vec![],
-            push_constant_ranges:         vec![],
-            shader:                       asset_server.load("water_height.wgsl"),
-            shader_defs:                  vec![],
-            entry_point:                  None,
-            zero_initialize_workgroup_memory: false,
-        });
+        compute_pipeline!(passes, "water_profile", asset_server, pipeline_cache, (
+            texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::WriteOnly),
+            uniform_buffer::<WaterSettings>(false),
+        ));
 
         Self {
-            inject_layout,
-            advection_layout,
-            diffusion_layout,
-            profile_layout,
-            inject_id,
-            advection_id,
-            diffusion_id,
-            profile_id,
+            passes: HashMap::new(),
         }
     }
 }
@@ -431,10 +187,7 @@ impl FromWorld for WaterPipelines {
 
 #[derive(Resource)]
 pub struct WaterBindGroups {
-    pub inject:    BindGroup,
-    pub advection: BindGroup,
-    pub diffusion: BindGroup,
-    pub profile:   BindGroup,
+    bind_groups: HashMap<String, BindGroup>,
     /// Settings uniform buffer (updated via write_buffer each frame).
     pub settings_buf: Buffer,
     /// Debug settings uniform buffer.
@@ -572,7 +325,7 @@ pub fn queue_bind_groups(
         &pipeline_cache.get_bind_group_layout(&pipelines.advection_layout),
         &BindGroupEntries::sequential((
             amp_read,
-            &gpu.amplitude_sampler,
+            &gpu.clamp_linear_sampler,
             amp_write,
             settings_buf.as_entire_binding(),
             voxel_texture_view,
@@ -588,7 +341,7 @@ pub fn queue_bind_groups(
         &pipeline_cache.get_bind_group_layout(&pipelines.diffusion_layout),
         &BindGroupEntries::sequential((
             amp_write,
-            &gpu.amplitude_sampler,
+            &gpu.clamp_linear_sampler,
             amp_read,
             settings_buf.as_entire_binding(),
             water_wave_group_speeds_buf.as_entire_binding(),

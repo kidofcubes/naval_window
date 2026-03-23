@@ -286,12 +286,12 @@ fn debug_input_system(
 // pub const GRID_X_SIZE: usize = 256;
 // pub const GRID_Z_SIZE: usize = 256;
 
-pub const GRID_X_SIZE: usize = 1024;
-pub const GRID_Z_SIZE: usize = 1024;
-pub const GRID_SCALE: f32 = 0.5; //how many meters each grid cell represents
+pub const GRID_X_SIZE: usize = 256;
+pub const GRID_Z_SIZE: usize = 256;
+pub const GRID_SCALE: f32 = 1.0; //how many meters each grid cell represents
 
 // pub const DIRECTIONS: usize = 1;
-pub const DIRECTIONS: usize = 48;
+pub const DIRECTIONS: usize = 32;
 // pub const TOTAL_ZETA_NUMBERS: usize = 1;
 pub const TOTAL_ZETA_NUMBERS: usize = 4;
 pub const MIN_ZETA: f32 = -5.0;
