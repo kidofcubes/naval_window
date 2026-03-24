@@ -3,6 +3,7 @@ use bevy::light::NotShadowCaster;
 use bevy::math::Vec2;
 use bevy::prelude::*;
 use bevy::mesh::{Indices, PrimitiveTopology};
+use num_complex::Complex32;
 use phastft::planner::Direction;
 use rand::Rng;
 
@@ -53,15 +54,13 @@ struct OceanMesh;
 #[derive(Resource)]
 struct OceanSimulation {
     config: OceanConfig,
-    h0: Vec<(f32, f32)>,
-    h0_conj: Vec<(f32, f32)>,
+    h0: Vec<Complex32>,
+    h0_conj: Vec<Complex32>,
     omega: Vec<f32>,
-    spectrum_real: Vec<f32>,
-    spectrum_imag: Vec<f32>,
+    spectrum: Vec<Complex32>,
     heights: Vec<f32>,
-    normals: Vec<[f32; 3]>,
-    row_scratch_re: Vec<f32>,
-    row_scratch_im: Vec<f32>,
+    normals: Vec<Vec3>,
+    row_scratch: Vec<Complex32>,
 }
 
 fn jonswap_spectrum(kx: f32, kz: f32, config: &OceanConfig) -> f32 {
@@ -110,56 +109,50 @@ fn jonswap_spectrum(kx: f32, kz: f32, config: &OceanConfig) -> f32 {
     (config.amplitude * s_k * directional).max(0.0)
 }
 
-fn box_muller(rng: &mut impl Rng) -> (f32, f32) {
+fn box_muller(rng: &mut impl Rng) -> Complex32 {
     let u1: f32 = rng.random::<f32>().max(1e-10);
     let u2: f32 = rng.random::<f32>();
     let r = (-2.0 * u1.ln()).sqrt();
     let theta = 2.0 * std::f32::consts::PI * u2;
-    (r * theta.cos(), r * theta.sin())
+    Complex32::new(r * theta.cos(), r * theta.sin())
 }
 
 fn ifft_2d(
-    re: &mut [f32],
-    im: &mut [f32],
+    data: &mut [Complex32],
     n: usize,
-    scratch_re: &mut Vec<f32>,
-    scratch_im: &mut Vec<f32>,
+    scratch: &mut Vec<Complex32>,
 ) {
-    scratch_re.resize(n, 0.0);
-    scratch_im.resize(n, 0.0);
+    scratch.resize(n, Complex32::new(0.0, 0.0));
 
     // Row pass
     for z in 0..n {
         let offset = z * n;
-        scratch_re.copy_from_slice(&re[offset..offset + n]);
-        scratch_im.copy_from_slice(&im[offset..offset + n]);
+        scratch.copy_from_slice(&data[offset..offset + n]);
 
-        phastft::fft_32(scratch_re, scratch_im, Direction::Reverse);
+        phastft::fft_32_interleaved(scratch, Direction::Reverse);
 
-        re[offset..offset + n].copy_from_slice(scratch_re);
-        im[offset..offset + n].copy_from_slice(scratch_im);
+        data[offset..offset + n].copy_from_slice(scratch);
     }
 
     // Column pass
     for x in 0..n {
         for z in 0..n {
-            scratch_re[z] = re[z * n + x];
-            scratch_im[z] = im[z * n + x];
+            scratch[z] = data[z * n + x];
         }
 
-        phastft::fft_32(scratch_re, scratch_im, Direction::Reverse);
+        phastft::fft_32_interleaved(scratch, Direction::Reverse);
 
         for z in 0..n {
             // fftshift sign correction: (-1)^(x+z)
             // Also multiply by N² to undo phastft's 1/N normalization per pass,
             // since Tessendorf expects an unnormalized DFT sum.
             let sign = if (x + z) % 2 == 0 { 1.0 } else { -1.0 };
-            re[z * n + x] = scratch_re[z] * sign * (n * n) as f32;
+            data[z * n + x].re = scratch[z].re * sign * (n * n) as f32;
         }
     }
 }
 
-fn compute_normals(heights: &[f32], normals: &mut [[f32; 3]], n: usize, patch_length: f32) {
+fn compute_normals(heights: &[f32], normals: &mut [Vec3], n: usize, patch_length: f32) {
     let dx = patch_length / n as f32;
     for z in 0..n {
         for x in 0..n {
@@ -171,8 +164,7 @@ fn compute_normals(heights: &[f32], normals: &mut [[f32; 3]], n: usize, patch_le
             let dhdx = (right - left) / (2.0 * dx);
             let dhdz = (up - down) / (2.0 * dx);
 
-            let normal = Vec3::new(-dhdx, 1.0, -dhdz).normalize();
-            normals[z * n + x] = [normal.x, normal.y, normal.z];
+            normals[z * n + x] = Vec3::new(-dhdx, 1.0, -dhdz).normalize();
         }
     }
 }
@@ -196,8 +188,8 @@ fn sample_bilinear(data: &[f32], n: usize, fx: f32, fz: f32) -> f32 {
     top + (bot - top) * tz
 }
 
-/// Bilinear interpolation into a flat N×N grid of [f32; 3], returns normalized result.
-fn sample_bilinear_normal(data: &[[f32; 3]], n: usize, fx: f32, fz: f32) -> [f32; 3] {
+/// Bilinear interpolation into a flat N×N grid of Vec3, returns normalized result.
+fn sample_bilinear_normal(data: &[Vec3], n: usize, fx: f32, fz: f32) -> Vec3 {
     let x0 = (fx as usize).min(n - 1);
     let z0 = (fz as usize).min(n - 1);
     let x1 = (x0 + 1).min(n - 1);
@@ -205,23 +197,14 @@ fn sample_bilinear_normal(data: &[[f32; 3]], n: usize, fx: f32, fz: f32) -> [f32
     let tx = fx - x0 as f32;
     let tz = fz - z0 as f32;
 
-    let mut result = [0.0f32; 3];
-    for i in 0..3 {
-        let v00 = data[z0 * n + x0][i];
-        let v10 = data[z0 * n + x1][i];
-        let v01 = data[z1 * n + x0][i];
-        let v11 = data[z1 * n + x1][i];
-        let top = v00 + (v10 - v00) * tx;
-        let bot = v01 + (v11 - v01) * tx;
-        result[i] = top + (bot - top) * tz;
-    }
-    let len = (result[0] * result[0] + result[1] * result[1] + result[2] * result[2]).sqrt();
-    if len > 1e-8 {
-        result[0] /= len;
-        result[1] /= len;
-        result[2] /= len;
-    }
-    result
+    let v00 = data[z0 * n + x0];
+    let v10 = data[z0 * n + x1];
+    let v01 = data[z1 * n + x0];
+    let v11 = data[z1 * n + x1];
+    let top = v00 + (v10 - v00) * tx;
+    let bot = v01 + (v11 - v01) * tx;
+    let result = top + (bot - top) * tz;
+    result.normalize_or_zero()
 }
 
 fn build_ocean_mesh(n: usize, patch_length: f32, step: f32) -> Mesh {
@@ -273,8 +256,8 @@ fn init_ocean(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
     let n = config.grid_size;
     let n2 = n * n;
 
-    let mut h0 = vec![(0.0f32, 0.0f32); n2];
-    let mut h0_conj = vec![(0.0f32, 0.0f32); n2];
+    let mut h0 = vec![Complex32::new(0.0, 0.0); n2];
+    let mut h0_conj = vec![Complex32::new(0.0, 0.0); n2];
     let mut omega = vec![0.0f32; n2];
 
     let mut rng = rand::rng();
@@ -293,9 +276,9 @@ fn init_ocean(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
             omega[idx] = (g * k_mag).sqrt();
 
             let spectrum = jonswap_spectrum(kx, kz, &config);
-            let (xi_r, xi_i) = box_muller(&mut rng);
+            let xi = box_muller(&mut rng);
             let scale = (spectrum.sqrt()) * std::f32::consts::FRAC_1_SQRT_2;
-            h0[idx] = (xi_r * scale, xi_i * scale);
+            h0[idx] = xi * scale;
         }
     }
 
@@ -306,8 +289,7 @@ fn init_ocean(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
             let mirror_m = (n - m) % n;
             let mirror_n = (n - nn) % n;
             let mirror_idx = mirror_m * n + mirror_n;
-            // conjugate: negate imaginary part
-            h0_conj[idx] = (h0[mirror_idx].0, -h0[mirror_idx].1);
+            h0_conj[idx] = h0[mirror_idx].conj();
         }
     }
 
@@ -333,12 +315,10 @@ fn init_ocean(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
         h0,
         h0_conj,
         omega,
-        spectrum_real: vec![0.0; n2],
-        spectrum_imag: vec![0.0; n2],
+        spectrum: vec![Complex32::new(0.0, 0.0); n2],
         heights: vec![0.0; n2],
-        normals: vec![[0.0, 1.0, 0.0]; n2],
-        row_scratch_re: vec![0.0; n],
-        row_scratch_im: vec![0.0; n],
+        normals: vec![Vec3::Y; n2],
+        row_scratch: vec![Complex32::new(0.0, 0.0); n],
     });
 }
 
@@ -356,29 +336,22 @@ fn update_ocean(
 
     // Step 1: Time-evolve spectrum
     for idx in 0..n2 {
-        let (a_r, a_i) = sim.h0[idx];
-        let (b_r, b_i) = sim.h0_conj[idx];
+        let a = sim.h0[idx];
+        let b = sim.h0_conj[idx];
         let wt = sim.omega[idx] * t;
-        let (sin_wt, cos_wt) = wt.sin_cos();
-
-        sim.spectrum_real[idx] = a_r * cos_wt - a_i * sin_wt + b_r * cos_wt + b_i * sin_wt;
-        sim.spectrum_imag[idx] = a_r * sin_wt + a_i * cos_wt - b_r * sin_wt + b_i * cos_wt;
+        let exp_iwt = Complex32::from_polar(1.0, wt);
+        sim.spectrum[idx] = a * exp_iwt + b * exp_iwt.conj();
     }
 
     // Step 2: 2D IFFT
-    // Need to split borrows carefully
-    let (spectrum_real, rest) = {
+    {
         let sim = &mut *sim;
-        let re = &mut sim.spectrum_real;
-        let im = &mut sim.spectrum_imag;
-        let scratch_re = &mut sim.row_scratch_re;
-        let scratch_im = &mut sim.row_scratch_im;
-        ifft_2d(re, im, n, scratch_re, scratch_im);
-        (&sim.spectrum_real as &[f32], &mut sim.heights)
-    };
-
-    // Copy real part to heights (already done by ifft_2d into spectrum_real with sign correction)
-    rest.copy_from_slice(spectrum_real);
+        let scratch = &mut sim.row_scratch;
+        ifft_2d(&mut sim.spectrum, n, scratch);
+        for idx in 0..n2 {
+            sim.heights[idx] = sim.spectrum[idx].re;
+        }
+    }
 
     // Debug: print height range every ~60 frames
     if (time.elapsed_secs() * 10.0) as u32 % 10 == 0 {
@@ -413,7 +386,7 @@ fn update_ocean(
                             let fx = mx as f32 * MESH_STEP;
                             let fz = mz as f32 * MESH_STEP;
                             let src_normal = sample_bilinear_normal(&sim.normals, n, fx, fz);
-                            norms[mz * mesh_n + mx] = src_normal;
+                            norms[mz * mesh_n + mx] = src_normal.into();
                         }
                     }
                 }

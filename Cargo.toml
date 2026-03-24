@@ -19,6 +19,7 @@ meshopt = "0.6.2"
 glam = {  version = "0.32.0", features = ["encase"]}
 strum = { version = "0.28.0", features = ["derive"]}
 phastft = { version = "0.3.0", features = ["complex-nums"] } #wants nightly
+num-complex = "0.4.6"
 #rustfft = "6.4.1"
 
 

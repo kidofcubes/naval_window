@@ -4107,6 +4107,7 @@ dependencies = [
  "glam 0.32.0",
  "meshopt",
  "naval_sketch",
+ "num-complex",
  "phastft",
  "rand",
  "strum",
