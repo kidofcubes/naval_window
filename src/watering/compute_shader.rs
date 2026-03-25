@@ -14,14 +14,14 @@ use crate::watering::{VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterS
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
-pub enum WaterPass {
+pub enum ComputePasses {
     WaterInject,
     WaterAdvection,
     WaterDiffusion,
     WaterProfile,
 }
 
-impl WaterPass {
+impl ComputePasses {
     pub fn wgsl_path(&self) -> String {
         format!("{}.wgsl", self.as_ref())
     }
@@ -29,7 +29,7 @@ impl WaterPass {
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
-pub enum WaterBuffer {
+pub enum Buffers {
     Settings,
     DebugSettings,
     VoxelSettings,
@@ -67,10 +67,10 @@ impl render_graph::Node for WaterSimulationNode {
         let wg_profile = (PROFILE_BUFFER_LENGTH.div_ceil(128) as u32, 1, 1);
 
         let passes_to_run = [
-            (WaterPass::WaterInject,    wg_grid),
-            (WaterPass::WaterAdvection, wg_grid),
-            (WaterPass::WaterDiffusion, wg_grid),
-            (WaterPass::WaterProfile,   wg_profile),
+            (ComputePasses::WaterInject, wg_grid),
+            (ComputePasses::WaterAdvection, wg_grid),
+            (ComputePasses::WaterDiffusion, wg_grid),
+            (ComputePasses::WaterProfile, wg_profile),
         ];
 
         // Resolve all pipelines + bind groups; bail if any aren't ready.
@@ -132,7 +132,7 @@ pub fn prepare_gpu_resources(
 /// `$entries` is the tuple passed to `BindGroupLayoutEntries::sequential`.
 macro_rules! compute_pipeline {
     ($passes_map:expr, $pass:expr, $asset_server:expr, $pipeline_cache:expr, $entries:expr) => {{
-        let pass: WaterPass = $pass;
+        let pass: ComputePasses = $pass;
         let label: &'static str = Box::leak(pass.as_ref().to_owned().into_boxed_str());
         let layout_label: &'static str = Box::leak(format!("{}_layout", label).into_boxed_str());
         let layout = BindGroupLayoutDescriptor::new(
@@ -155,7 +155,7 @@ macro_rules! compute_pipeline {
 /// Holds all compute pipelines and their shared bind group layouts.
 #[derive(Resource)]
 pub struct WaterPipelines {
-    pub passes: HashMap<WaterPass, (BindGroupLayoutDescriptor, CachedComputePipelineId)>,
+    pub passes: HashMap<ComputePasses, (BindGroupLayoutDescriptor, CachedComputePipelineId)>,
 }
 
 impl FromWorld for WaterPipelines {
@@ -165,13 +165,13 @@ impl FromWorld for WaterPipelines {
         let asset_server  = world.resource::<AssetServer>();
         let pipeline_cache = world.resource::<PipelineCache>();
 
-        compute_pipeline!(passes, WaterPass::WaterInject, asset_server, pipeline_cache, (
+        compute_pipeline!(passes, ComputePasses::WaterInject, asset_server, pipeline_cache, (
             texture_storage_2d_array(TextureFormat::R32Float, StorageTextureAccess::ReadWrite),
             uniform_buffer::<WaterSettings>(false),
             uniform_buffer::<WaterDebugSettings>(false),
         ));
 
-        compute_pipeline!(passes, WaterPass::WaterAdvection, asset_server, pipeline_cache, (
+        compute_pipeline!(passes, ComputePasses::WaterAdvection, asset_server, pipeline_cache, (
             texture_2d_array(bevy::render::render_resource::TextureSampleType::Float { filterable: true }),
             sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
             texture_storage_2d_array(TextureFormat::R32Float, StorageTextureAccess::WriteOnly),
@@ -182,7 +182,7 @@ impl FromWorld for WaterPipelines {
             texture_3d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),
         ));
 
-        compute_pipeline!(passes, WaterPass::WaterDiffusion, asset_server, pipeline_cache, (
+        compute_pipeline!(passes, ComputePasses::WaterDiffusion, asset_server, pipeline_cache, (
             texture_2d_array(bevy::render::render_resource::TextureSampleType::Float { filterable: true }),
             sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
             texture_storage_2d_array(TextureFormat::R32Float, StorageTextureAccess::WriteOnly),
@@ -190,7 +190,7 @@ impl FromWorld for WaterPipelines {
             uniform_buffer::<WaterWaveGroupSpeeds>(false),
         ));
 
-        compute_pipeline!(passes, WaterPass::WaterProfile, asset_server, pipeline_cache, (
+        compute_pipeline!(passes, ComputePasses::WaterProfile, asset_server, pipeline_cache, (
             texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::WriteOnly),
             uniform_buffer::<WaterSettings>(false),
         ));
@@ -203,8 +203,8 @@ impl FromWorld for WaterPipelines {
 
 #[derive(Resource)]
 pub struct WaterBindGroups {
-    pub bind_groups: HashMap<WaterPass, BindGroup>,
-    pub buffers: HashMap<WaterBuffer, Buffer>,
+    pub bind_groups: HashMap<ComputePasses, BindGroup>,
+    pub buffers: HashMap<Buffers, Buffer>,
 }
 
 pub fn queue_bind_groups(
@@ -249,11 +249,11 @@ pub fn queue_bind_groups(
     }
 
     // ── Create or update the uniform buffers ────────────────────────────────
-    let buffers: HashMap<WaterBuffer, Buffer> = if let Some(bgs) = existing_bgs {
+    let buffers: HashMap<Buffers, Buffer> = if let Some(bgs) = existing_bgs {
         // Update existing buffers in-place.
-        queue.write_buffer(&bgs.buffers[&WaterBuffer::Settings], 0, &encode_uniform!(&*settings));
-        queue.write_buffer(&bgs.buffers[&WaterBuffer::DebugSettings], 0, &encode_uniform!(&*debug_settings));
-        queue.write_buffer(&bgs.buffers[&WaterBuffer::VoxelSettings], 0, &encode_uniform!(&*voxel_settings));
+        queue.write_buffer(&bgs.buffers[&Buffers::Settings], 0, &encode_uniform!(&*settings));
+        queue.write_buffer(&bgs.buffers[&Buffers::DebugSettings], 0, &encode_uniform!(&*debug_settings));
+        queue.write_buffer(&bgs.buffers[&Buffers::VoxelSettings], 0, &encode_uniform!(&*voxel_settings));
         // WaterWaveGroupSpeeds doesn't change at runtime.
 
         bgs.buffers.clone()
@@ -267,14 +267,14 @@ pub fn queue_bind_groups(
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
 
-        bufs.insert(WaterBuffer::Settings,             mk("water_settings_buf", encode_uniform!(&*settings)));
-        bufs.insert(WaterBuffer::DebugSettings,        mk("water_debug_settings_buf", encode_uniform!(&*debug_settings)));
-        bufs.insert(WaterBuffer::VoxelSettings,        mk("water_voxel_settings_buf", encode_uniform!(&*voxel_settings)));
+        bufs.insert(Buffers::Settings, mk("water_settings_buf", encode_uniform!(&*settings)));
+        bufs.insert(Buffers::DebugSettings, mk("water_debug_settings_buf", encode_uniform!(&*debug_settings)));
+        bufs.insert(Buffers::VoxelSettings, mk("water_voxel_settings_buf", encode_uniform!(&*voxel_settings)));
 
         // WaterWaveGroupSpeeds uses dynamic alignment
         let mut dyn_buf = encase::DynamicUniformBuffer::new_with_alignment(Vec::<u8>::new(), 32);
         dyn_buf.write(&*water_wave_group_speeds).expect("ShaderType write failed");
-        bufs.insert(WaterBuffer::WaterWaveGroupSpeeds, mk("water_wave_group_speeds_buf", dyn_buf.into_inner()));
+        bufs.insert(Buffers::WaterWaveGroupSpeeds, mk("water_wave_group_speeds_buf", dyn_buf.into_inner()));
 
         bufs
     };
@@ -286,20 +286,20 @@ pub fn queue_bind_groups(
     };
 
     // ── Helper: look up layout for a pass ────────────────────────────────────
-    let layout_for = |pass: WaterPass| -> &BindGroupLayoutDescriptor {
+    let layout_for = |pass: ComputePasses| -> &BindGroupLayoutDescriptor {
         &pipelines.passes[&pass].0
     };
 
-    let settings_buf        = &buffers[&WaterBuffer::Settings];
-    let debug_settings_buf  = &buffers[&WaterBuffer::DebugSettings];
-    let voxel_settings_buf  = &buffers[&WaterBuffer::VoxelSettings];
-    let wave_speeds_buf     = &buffers[&WaterBuffer::WaterWaveGroupSpeeds];
+    let settings_buf        = &buffers[&Buffers::Settings];
+    let debug_settings_buf  = &buffers[&Buffers::DebugSettings];
+    let voxel_settings_buf  = &buffers[&Buffers::VoxelSettings];
+    let wave_speeds_buf     = &buffers[&Buffers::WaterWaveGroupSpeeds];
 
     let mut bind_groups = HashMap::new();
 
-    bind_groups.insert(WaterPass::WaterInject, device.create_bind_group(
+    bind_groups.insert(ComputePasses::WaterInject, device.create_bind_group(
         "inject_bg",
-        &pipeline_cache.get_bind_group_layout(layout_for(WaterPass::WaterInject)),
+        &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::WaterInject)),
         &BindGroupEntries::sequential((
             amp_read,
             settings_buf.as_entire_binding(),
@@ -307,9 +307,9 @@ pub fn queue_bind_groups(
         )),
     ));
 
-    bind_groups.insert(WaterPass::WaterAdvection, device.create_bind_group(
+    bind_groups.insert(ComputePasses::WaterAdvection, device.create_bind_group(
         "advection_bg",
-        &pipeline_cache.get_bind_group_layout(layout_for(WaterPass::WaterAdvection)),
+        &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::WaterAdvection)),
         &BindGroupEntries::sequential((
             amp_read,
             &gpu.clamp_linear_sampler,
@@ -322,9 +322,9 @@ pub fn queue_bind_groups(
         )),
     ));
 
-    bind_groups.insert(WaterPass::WaterDiffusion, device.create_bind_group(
+    bind_groups.insert(ComputePasses::WaterDiffusion, device.create_bind_group(
         "diffusion_bg",
-        &pipeline_cache.get_bind_group_layout(layout_for(WaterPass::WaterDiffusion)),
+        &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::WaterDiffusion)),
         &BindGroupEntries::sequential((
             amp_write,
             &gpu.clamp_linear_sampler,
@@ -334,9 +334,9 @@ pub fn queue_bind_groups(
         )),
     ));
 
-    bind_groups.insert(WaterPass::WaterProfile, device.create_bind_group(
+    bind_groups.insert(ComputePasses::WaterProfile, device.create_bind_group(
         "profile_bg",
-        &pipeline_cache.get_bind_group_layout(layout_for(WaterPass::WaterProfile)),
+        &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::WaterProfile)),
         &BindGroupEntries::sequential((
             &profile_buffer.texture_view,
             settings_buf.as_entire_binding(),

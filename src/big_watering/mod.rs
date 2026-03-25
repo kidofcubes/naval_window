@@ -54,192 +54,192 @@ struct OceanMesh;
 #[derive(Resource)]
 struct OceanSimulation {
     config: OceanConfig,
-    h0: Vec<Complex32>,
-    h0_conj: Vec<Complex32>,
-    omega: Vec<f32>,
-    spectrum: Vec<Complex32>,
-    heights: Vec<f32>,
-    normals: Vec<Vec3>,
-    row_scratch: Vec<Complex32>,
+    initial_spectrum: Vec<Vec<Complex32>>,
+    initial_spectrum_conjugate: Vec<Vec<Complex32>>,
+    angular_frequency: Vec<Vec<f32>>,
+    evolved_spectrum: Vec<Vec<Complex32>>,
+    heights: Vec<Vec<f32>>,
+    normals: Vec<Vec<Vec3>>,
+    fft_scratch: Vec<Complex32>,
 }
 
 fn jonswap_spectrum(kx: f32, kz: f32, config: &OceanConfig) -> f32 {
-    let k_mag = (kx * kx + kz * kz).sqrt();
-    if k_mag < 1e-8 {
+    let wave_number = (kx * kx + kz * kz).sqrt();
+    if wave_number < 1e-8 {
         return 0.0;
     }
 
-    let g = config.gravity;
-    let omega = (g * k_mag).sqrt();
+    let gravity = config.gravity;
+    let angular_frequency = (gravity * wave_number).sqrt();
 
     // Peak frequency (JONSWAP)
-    let omega_p = 22.0 * (g * g / (config.wind_speed * config.fetch)).powf(1.0 / 3.0);
+    let omega_peak = 22.0 * (gravity * gravity / (config.wind_speed * config.fetch)).powf(1.0 / 3.0);
 
-    if omega < 1e-8 {
+    if angular_frequency < 1e-8 {
         return 0.0;
     }
 
     // Pierson-Moskowitz base spectrum
     let alpha = 0.0081;
-    let omega_ratio = omega_p / omega;
-    let s_pm = (alpha * g * g / omega.powi(5))
+    let omega_ratio = omega_peak / angular_frequency;
+    let pierson_moskowitz = (alpha * gravity * gravity / angular_frequency.powi(5))
         * (-1.25 * omega_ratio.powi(4)).exp();
 
     // JONSWAP peak enhancement
-    let sigma = if omega <= omega_p { 0.07 } else { 0.09 };
-    let r = ((omega - omega_p).powi(2)) / (2.0 * sigma * sigma * omega_p * omega_p);
-    let gamma_factor = config.gamma.powf((-r).exp());
+    let sigma = if angular_frequency <= omega_peak { 0.07 } else { 0.09 };
+    let exponent = ((angular_frequency - omega_peak).powi(2)) / (2.0 * sigma * sigma * omega_peak * omega_peak);
+    let gamma_factor = config.gamma.powf((-exponent).exp());
 
-    let s_jonswap = s_pm * gamma_factor;
+    let jonswap = pierson_moskowitz * gamma_factor;
 
     // Convert to k-space: S(k) = S(omega) * d_omega/dk / (2*pi)
     // d_omega/dk = g / (2 * omega) for deep water dispersion
-    let d_omega_dk = g / (2.0 * omega);
-    let s_k = s_jonswap * d_omega_dk / (2.0 * std::f32::consts::PI);
+    let d_omega_dk = gravity / (2.0 * angular_frequency);
+    let spectrum_k = jonswap * d_omega_dk / (2.0 * std::f32::consts::PI);
 
     // Directional spreading: cos^2(theta) where theta is angle between k and wind
-    let k_dir = Vec2::new(kx, kz) / k_mag;
-    let cos_theta = k_dir.dot(config.wind_dir);
+    let wave_dir = Vec2::new(kx, kz) / wave_number;
+    let cos_theta = wave_dir.dot(config.wind_dir);
     let directional = if cos_theta > 0.0 {
         cos_theta * cos_theta
     } else {
         0.0
     };
 
-    (config.amplitude * s_k * directional).max(0.0)
+    (config.amplitude * spectrum_k * directional).max(0.0)
 }
 
 fn box_muller(rng: &mut impl Rng) -> Complex32 {
     let u1: f32 = rng.random::<f32>().max(1e-10);
     let u2: f32 = rng.random::<f32>();
-    let r = (-2.0 * u1.ln()).sqrt();
-    let theta = 2.0 * std::f32::consts::PI * u2;
-    Complex32::new(r * theta.cos(), r * theta.sin())
+    let radius = (-2.0 * u1.ln()).sqrt();
+    let angle = 2.0 * std::f32::consts::PI * u2;
+    Complex32::new(radius * angle.cos(), radius * angle.sin())
 }
 
 fn ifft_2d(
-    data: &mut [Complex32],
-    n: usize,
+    grid: &mut Vec<Vec<Complex32>>,
     scratch: &mut Vec<Complex32>,
 ) {
-    scratch.resize(n, Complex32::new(0.0, 0.0));
+    let grid_size = grid.len();
+    scratch.resize(grid_size, Complex32::new(0.0, 0.0));
 
     // Row pass
-    for z in 0..n {
-        let offset = z * n;
-        scratch.copy_from_slice(&data[offset..offset + n]);
-
+    for row in grid.iter_mut() {
+        scratch.copy_from_slice(row);
         phastft::fft_32_interleaved(scratch, Direction::Reverse);
-
-        data[offset..offset + n].copy_from_slice(scratch);
+        row.copy_from_slice(scratch);
     }
 
     // Column pass
-    for x in 0..n {
-        for z in 0..n {
-            scratch[z] = data[z * n + x];
+    for col in 0..grid_size {
+        for row in 0..grid_size {
+            scratch[row] = grid[row][col];
         }
 
         phastft::fft_32_interleaved(scratch, Direction::Reverse);
 
-        for z in 0..n {
-            // fftshift sign correction: (-1)^(x+z)
+        for row in 0..grid_size {
+            // fftshift sign correction: (-1)^(col+row)
             // Also multiply by N² to undo phastft's 1/N normalization per pass,
             // since Tessendorf expects an unnormalized DFT sum.
-            let sign = if (x + z) % 2 == 0 { 1.0 } else { -1.0 };
-            data[z * n + x].re = scratch[z].re * sign * (n * n) as f32;
+            let sign = if (col + row) % 2 == 0 { 1.0 } else { -1.0 };
+            grid[row][col].re = scratch[row].re * sign * (grid_size * grid_size) as f32;
         }
     }
 }
 
-fn compute_normals(heights: &[f32], normals: &mut [Vec3], n: usize, patch_length: f32) {
-    let dx = patch_length / n as f32;
-    for z in 0..n {
-        for x in 0..n {
-            let left = heights[z * n + (x + n - 1) % n];
-            let right = heights[z * n + (x + 1) % n];
-            let down = heights[((z + n - 1) % n) * n + x];
-            let up = heights[((z + 1) % n) * n + x];
+fn compute_normals(heights: &Vec<Vec<f32>>, normals: &mut Vec<Vec<Vec3>>, patch_length: f32) {
+    let grid_size = heights.len();
+    let cell_size = patch_length / grid_size as f32;
+    for row in 0..grid_size {
+        for col in 0..grid_size {
+            let left = heights[row][(col + grid_size - 1) % grid_size];
+            let right = heights[row][(col + 1) % grid_size];
+            let down = heights[(row + grid_size - 1) % grid_size][col];
+            let up = heights[(row + 1) % grid_size][col];
 
-            let dhdx = (right - left) / (2.0 * dx);
-            let dhdz = (up - down) / (2.0 * dx);
+            let dh_dx = (right - left) / (2.0 * cell_size);
+            let dh_dz = (up - down) / (2.0 * cell_size);
 
-            normals[z * n + x] = Vec3::new(-dhdx, 1.0, -dhdz).normalize();
+            normals[row][col] = Vec3::new(-dh_dx, 1.0, -dh_dz).normalize();
         }
     }
 }
 
-/// Bilinear interpolation into a flat N×N grid of f32.
-fn sample_bilinear(data: &[f32], n: usize, fx: f32, fz: f32) -> f32 {
-    let x0 = (fx as usize).min(n - 1);
-    let z0 = (fz as usize).min(n - 1);
-    let x1 = (x0 + 1).min(n - 1);
-    let z1 = (z0 + 1).min(n - 1);
-    let tx = fx - x0 as f32;
-    let tz = fz - z0 as f32;
+/// Bilinear interpolation into an N×N grid of f32.
+fn sample_bilinear(grid: &Vec<Vec<f32>>, fractional_col: f32, fractional_row: f32) -> f32 {
+    let grid_size = grid.len();
+    let col0 = (fractional_col as usize).min(grid_size - 1);
+    let row0 = (fractional_row as usize).min(grid_size - 1);
+    let col1 = (col0 + 1).min(grid_size - 1);
+    let row1 = (row0 + 1).min(grid_size - 1);
+    let t_col = fractional_col - col0 as f32;
+    let t_row = fractional_row - row0 as f32;
 
-    let v00 = data[z0 * n + x0];
-    let v10 = data[z0 * n + x1];
-    let v01 = data[z1 * n + x0];
-    let v11 = data[z1 * n + x1];
+    let v00 = grid[row0][col0];
+    let v10 = grid[row0][col1];
+    let v01 = grid[row1][col0];
+    let v11 = grid[row1][col1];
 
-    let top = v00 + (v10 - v00) * tx;
-    let bot = v01 + (v11 - v01) * tx;
-    top + (bot - top) * tz
+    let top = v00 + (v10 - v00) * t_col;
+    let bot = v01 + (v11 - v01) * t_col;
+    top + (bot - top) * t_row
 }
 
-/// Bilinear interpolation into a flat N×N grid of Vec3, returns normalized result.
-fn sample_bilinear_normal(data: &[Vec3], n: usize, fx: f32, fz: f32) -> Vec3 {
-    let x0 = (fx as usize).min(n - 1);
-    let z0 = (fz as usize).min(n - 1);
-    let x1 = (x0 + 1).min(n - 1);
-    let z1 = (z0 + 1).min(n - 1);
-    let tx = fx - x0 as f32;
-    let tz = fz - z0 as f32;
+/// Bilinear interpolation into an N×N grid of Vec3, returns normalized result.
+fn sample_bilinear_normal(grid: &Vec<Vec<Vec3>>, fractional_col: f32, fractional_row: f32) -> Vec3 {
+    let grid_size = grid.len();
+    let col0 = (fractional_col as usize).min(grid_size - 1);
+    let row0 = (fractional_row as usize).min(grid_size - 1);
+    let col1 = (col0 + 1).min(grid_size - 1);
+    let row1 = (row0 + 1).min(grid_size - 1);
+    let t_col = fractional_col - col0 as f32;
+    let t_row = fractional_row - row0 as f32;
 
-    let v00 = data[z0 * n + x0];
-    let v10 = data[z0 * n + x1];
-    let v01 = data[z1 * n + x0];
-    let v11 = data[z1 * n + x1];
-    let top = v00 + (v10 - v00) * tx;
-    let bot = v01 + (v11 - v01) * tx;
-    let result = top + (bot - top) * tz;
+    let v00 = grid[row0][col0];
+    let v10 = grid[row0][col1];
+    let v01 = grid[row1][col0];
+    let v11 = grid[row1][col1];
+    let top = v00 + (v10 - v00) * t_col;
+    let bot = v01 + (v11 - v01) * t_col;
+    let result = top + (bot - top) * t_row;
     result.normalize_or_zero()
 }
 
-fn build_ocean_mesh(n: usize, patch_length: f32, step: f32) -> Mesh {
-    let mesh_n = (n as f32 / step) as usize; // vertices per side
-    let dx = patch_length / n as f32;
-    let offset = -patch_length / 2.0;
+fn build_ocean_mesh(grid_size: usize, patch_length: f32, mesh_step: f32) -> Mesh {
+    let vertices_per_side = (grid_size as f32 / mesh_step) as usize;
+    let cell_size = patch_length / grid_size as f32;
+    let origin_offset = -patch_length / 2.0;
 
-    let vertex_count = mesh_n * mesh_n;
+    let vertex_count = vertices_per_side * vertices_per_side;
     let mut positions = Vec::with_capacity(vertex_count);
     let mut normals = Vec::with_capacity(vertex_count);
     let mut uvs = Vec::with_capacity(vertex_count);
 
-    for z in 0..mesh_n {
-        for x in 0..mesh_n {
-            let px = offset + x as f32 * step * dx;
-            let pz = offset + z as f32 * step * dx;
-            positions.push([px, 0.0, pz]);
+    for row in 0..vertices_per_side {
+        for col in 0..vertices_per_side {
+            let world_x = origin_offset + col as f32 * mesh_step * cell_size;
+            let world_z = origin_offset + row as f32 * mesh_step * cell_size;
+            positions.push([world_x, 0.0, world_z]);
             normals.push([0.0, 1.0, 0.0]);
-            uvs.push([x as f32 / mesh_n as f32, z as f32 / mesh_n as f32]);
+            uvs.push([col as f32 / vertices_per_side as f32, row as f32 / vertices_per_side as f32]);
         }
     }
 
-    let mut indices = Vec::with_capacity((mesh_n - 1) * (mesh_n - 1) * 6);
-    for z in 0..(mesh_n - 1) {
-        for x in 0..(mesh_n - 1) {
-            let i = (z * mesh_n + x) as u32;
-            let right = i + 1;
-            let below = i + mesh_n as u32;
-            let below_right = below + 1;
-            indices.push(i);
-            indices.push(below);
-            indices.push(right);
-            indices.push(right);
-            indices.push(below);
-            indices.push(below_right);
+    let mut indices = Vec::with_capacity((vertices_per_side - 1) * (vertices_per_side - 1) * 6);
+    for row in 0..(vertices_per_side - 1) {
+        for col in 0..(vertices_per_side - 1) {
+            let top_left = (row * vertices_per_side + col) as u32;
+            let top_right = top_left + 1;
+            let bottom_left = top_left + vertices_per_side as u32;
+            let bottom_right = bottom_left + 1;
+            indices.push(top_left);
+            indices.push(bottom_left);
+            indices.push(top_right);
+            indices.push(top_right);
+            indices.push(bottom_left);
+            indices.push(bottom_right);
         }
     }
 
@@ -253,48 +253,47 @@ fn build_ocean_mesh(n: usize, patch_length: f32, step: f32) -> Mesh {
 
 fn init_ocean(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
     let config = OceanConfig::default();
-    let n = config.grid_size;
-    let n2 = n * n;
+    let grid_size = config.grid_size;
 
-    let mut h0 = vec![Complex32::new(0.0, 0.0); n2];
-    let mut h0_conj = vec![Complex32::new(0.0, 0.0); n2];
-    let mut omega = vec![0.0f32; n2];
+    let zero = Complex32::new(0.0, 0.0);
+    let mut initial_spectrum = vec![vec![zero; grid_size]; grid_size];
+    let mut angular_frequency = vec![vec![0.0f32; grid_size]; grid_size];
 
     let mut rng = rand::rng();
-    let l = config.patch_length;
-    let g = config.gravity;
-    let half_n = (n / 2) as f32;
+    let patch_length = config.patch_length;
+    let gravity = config.gravity;
+    let half_grid = (grid_size / 2) as f32;
 
-    // First pass: compute h0 and omega
-    for m in 0..n {
-        for nn in 0..n {
-            let kx = 2.0 * std::f32::consts::PI / l * (m as f32 - half_n);
-            let kz = 2.0 * std::f32::consts::PI / l * (nn as f32 - half_n);
-            let k_mag = (kx * kx + kz * kz).sqrt();
+    // First pass: compute initial_spectrum and angular_frequency
+    for row in 0..grid_size {
+        for col in 0..grid_size {
+            let kx = 2.0 * std::f32::consts::PI * ((row as f32 - half_grid) / patch_length);
+            let kz = 2.0 * std::f32::consts::PI * ((col as f32 - half_grid) / patch_length);
 
-            let idx = m * n + nn;
-            omega[idx] = (g * k_mag).sqrt();
+            //wave number is 1/wave length
+            let wave_number = vec2(kx, kz).length();
 
-            let spectrum = jonswap_spectrum(kx, kz, &config);
-            let xi = box_muller(&mut rng);
-            let scale = (spectrum.sqrt()) * std::f32::consts::FRAC_1_SQRT_2;
-            h0[idx] = xi * scale;
+            angular_frequency[row][col] = (gravity * wave_number).sqrt();
+
+            let spectrum_value = jonswap_spectrum(kx, kz, &config);
+            let gaussian_noise = box_muller(&mut rng);
+            let scale = spectrum_value.sqrt() * std::f32::consts::FRAC_1_SQRT_2;
+            initial_spectrum[row][col] = gaussian_noise * scale;
         }
     }
 
-    // Second pass: compute h0_conj from mirrored indices
-    for m in 0..n {
-        for nn in 0..n {
-            let idx = m * n + nn;
-            let mirror_m = (n - m) % n;
-            let mirror_n = (n - nn) % n;
-            let mirror_idx = mirror_m * n + mirror_n;
-            h0_conj[idx] = h0[mirror_idx].conj();
+    // Second pass: compute conjugate from mirrored indices
+    let mut initial_spectrum_conjugate = vec![vec![zero; grid_size]; grid_size];
+    for row in 0..grid_size {
+        for col in 0..grid_size {
+            let mirror_row = (grid_size - row) % grid_size;
+            let mirror_col = (grid_size - col) % grid_size;
+            initial_spectrum_conjugate[row][col] = initial_spectrum[mirror_row][mirror_col].conj();
         }
     }
 
     // Spawn ocean mesh entity
-    let ocean_mesh = build_ocean_mesh(n, config.patch_length, MESH_STEP);
+    let ocean_mesh = build_ocean_mesh(grid_size, config.patch_length, MESH_STEP);
     commands.spawn((
         Mesh3d(meshes.add(ocean_mesh)),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -312,13 +311,13 @@ fn init_ocean(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
 
     commands.insert_resource(OceanSimulation {
         config,
-        h0,
-        h0_conj,
-        omega,
-        spectrum: vec![Complex32::new(0.0, 0.0); n2],
-        heights: vec![0.0; n2],
-        normals: vec![Vec3::Y; n2],
-        row_scratch: vec![Complex32::new(0.0, 0.0); n],
+        initial_spectrum,
+        initial_spectrum_conjugate,
+        angular_frequency,
+        evolved_spectrum: vec![vec![zero; grid_size]; grid_size],
+        heights: vec![vec![0.0; grid_size]; grid_size],
+        normals: vec![vec![Vec3::Y; grid_size]; grid_size],
+        fft_scratch: vec![zero; grid_size],
     });
 }
 
@@ -329,97 +328,69 @@ fn update_ocean(
     ocean_query: Query<&Mesh3d, With<OceanMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let t = time.elapsed_secs();
-    let n = sim.config.grid_size;
-    let n2 = n * n;
+    let elapsed = time.elapsed_secs();
+    let grid_size = sim.config.grid_size;
     let patch_length = sim.config.patch_length;
 
     // Step 1: Time-evolve spectrum
-    for idx in 0..n2 {
-        let a = sim.h0[idx];
-        let b = sim.h0_conj[idx];
-        let wt = sim.omega[idx] * t;
-        let exp_iwt = Complex32::from_polar(1.0, wt);
-        sim.spectrum[idx] = a * exp_iwt + b * exp_iwt.conj();
+    for row in 0..grid_size {
+        for col in 0..grid_size {
+            let base = sim.initial_spectrum[row][col];
+            let conjugate = sim.initial_spectrum_conjugate[row][col];
+            let phase = sim.angular_frequency[row][col] * elapsed;
+            let exp_phase = Complex32::from_polar(1.0, phase);
+            sim.evolved_spectrum[row][col] = base * exp_phase + conjugate * exp_phase.conj();
+        }
     }
 
     // Step 2: 2D IFFT
     {
         let sim = &mut *sim;
-        let scratch = &mut sim.row_scratch;
-        ifft_2d(&mut sim.spectrum, n, scratch);
-        for idx in 0..n2 {
-            sim.heights[idx] = sim.spectrum[idx].re;
+        ifft_2d(&mut sim.evolved_spectrum, &mut sim.fft_scratch);
+        for row in 0..grid_size {
+            for col in 0..grid_size {
+                sim.heights[row][col] = sim.evolved_spectrum[row][col].re;
+            }
         }
     }
 
     // Debug: print height range every ~60 frames
-    if (time.elapsed_secs() * 10.0) as u32 % 10 == 0 {
-        let min_h = sim.heights.iter().cloned().fold(f32::INFINITY, f32::min);
-        let max_h = sim.heights.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        info!("Ocean height range: {:.3} to {:.3}", min_h, max_h);
+    if (elapsed * 10.0) as u32 % 10 == 0 {
+        let min_height = sim.heights.iter().flat_map(|row| row.iter()).cloned().fold(f32::INFINITY, f32::min);
+        let max_height = sim.heights.iter().flat_map(|row| row.iter()).cloned().fold(f32::NEG_INFINITY, f32::max);
+        info!("Ocean height range: {:.3} to {:.3}", min_height, max_height);
     }
 
     // Step 3: Compute normals
     let sim = &mut *sim;
-    compute_normals(&sim.heights, &mut sim.normals, n, patch_length);
+    compute_normals(&sim.heights, &mut sim.normals, patch_length);
 
     // Step 4: Update mesh vertices (bilinear interpolation for fractional MESH_STEP)
     if let Ok(mesh_handle) = ocean_query.single() {
         if let Some(mesh) = meshes.get_mut(mesh_handle) {
-            let mesh_n = (n as f32 / MESH_STEP) as usize;
+            let vertices_per_side = (grid_size as f32 / MESH_STEP) as usize;
             if let Some(positions) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
                 if let bevy::mesh::VertexAttributeValues::Float32x3(pos) = positions {
-                    for mz in 0..mesh_n {
-                        for mx in 0..mesh_n {
-                            let h = sample_bilinear(&sim.heights, n, mx as f32 * MESH_STEP, mz as f32 * MESH_STEP);
-                            pos[mz * mesh_n + mx][1] = h;
+                    for mesh_row in 0..vertices_per_side {
+                        for mesh_col in 0..vertices_per_side {
+                            let height = sample_bilinear(&sim.heights, mesh_col as f32 * MESH_STEP, mesh_row as f32 * MESH_STEP);
+                            pos[mesh_row * vertices_per_side + mesh_col][1] = height;
                         }
                     }
                 }
             }
-            // Update normals from computed normals (interpolate each component)
-            if let Some(norm_attr) = mesh.attribute_mut(Mesh::ATTRIBUTE_NORMAL) {
-                if let bevy::mesh::VertexAttributeValues::Float32x3(norms) = norm_attr {
-                    for mz in 0..mesh_n {
-                        for mx in 0..mesh_n {
-                            let fx = mx as f32 * MESH_STEP;
-                            let fz = mz as f32 * MESH_STEP;
-                            let src_normal = sample_bilinear_normal(&sim.normals, n, fx, fz);
-                            norms[mz * mesh_n + mx] = src_normal.into();
+            if let Some(normal_attr) = mesh.attribute_mut(Mesh::ATTRIBUTE_NORMAL) {
+                if let bevy::mesh::VertexAttributeValues::Float32x3(mesh_normals) = normal_attr {
+                    for mesh_row in 0..vertices_per_side {
+                        for mesh_col in 0..vertices_per_side {
+                            let fractional_col = mesh_col as f32 * MESH_STEP;
+                            let fractional_row = mesh_row as f32 * MESH_STEP;
+                            let normal = sample_bilinear_normal(&sim.normals, fractional_col, fractional_row);
+                            mesh_normals[mesh_row * vertices_per_side + mesh_col] = normal.into();
                         }
                     }
                 }
             }
         }
     }
-
-    // // Step 5: Debug gizmo wireframe (sparse, every 8th point)
-    // let gizmo_step = 8;
-    // let dx = patch_length / n as f32;
-    // let offset_x = -patch_length / 2.0;
-    // let offset_z = -patch_length / 2.0;
-    //
-    // for z in (0..n - 1).step_by(gizmo_step) {
-    //     for x in (0..n - 1).step_by(gizmo_step) {
-    //         let h00 = sim.heights[z * n + x];
-    //         let h10 = sim.heights[z * n + (x + gizmo_step).min(n - 1)];
-    //         let h01 = sim.heights[((z + gizmo_step).min(n - 1)) * n + x];
-    //
-    //         let p00 = Vec3::new(offset_x + x as f32 * dx, h00, offset_z + z as f32 * dx);
-    //         let p10 = Vec3::new(
-    //             offset_x + (x + gizmo_step).min(n - 1) as f32 * dx,
-    //             h10,
-    //             offset_z + z as f32 * dx,
-    //         );
-    //         let p01 = Vec3::new(
-    //             offset_x + x as f32 * dx,
-    //             h01,
-    //             offset_z + ((z + gizmo_step).min(n - 1)) as f32 * dx,
-    //         );
-    //
-    //         gizmos.line(p00, p10, Color::srgb(0.2, 0.5, 1.0));
-    //         gizmos.line(p00, p01, Color::srgb(0.2, 0.5, 1.0));
-    //     }
-    // }
 }
