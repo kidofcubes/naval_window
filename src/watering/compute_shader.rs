@@ -8,7 +8,8 @@ use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, te
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
 use strum::AsRefStr;
-use crate::watering::{VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, WaterSimulationHandles};
+use bevy::render::render_resource::binding_types::texture_2d;
+use crate::watering::{FftOceanHandles, FftOceanSettings, VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, WaterSimulationHandles};
 
 // ─── Pass / Buffer Enums ─────────────────────────────────────────────────────
 
@@ -19,6 +20,10 @@ pub enum ComputePasses {
     WaterAdvection,
     WaterDiffusion,
     WaterProfile,
+    FftTimeEvolve,
+    FftIfftRows,
+    FftIfftCols,
+    FftNormals,
 }
 
 impl ComputePasses {
@@ -34,6 +39,7 @@ pub enum Buffers {
     DebugSettings,
     VoxelSettings,
     WaterWaveGroupSpeeds,
+    FftOceanSettings,
 }
 
 // ─── GPU Resources ────────────────────────────────────────────────────────────
@@ -73,12 +79,33 @@ impl render_graph::Node for WaterSimulationNode {
             (ComputePasses::WaterProfile, wg_profile),
         ];
 
+        // ── FFT Ocean workgroup counts ───────────────────────────────────────
+        let fft_size = GRID_X_SIZE as u32; // 256
+        let wg_fft_grid = (fft_size.div_ceil(16), fft_size.div_ceil(16), 1);
+        let wg_fft_rows = (1, fft_size, 1); // one workgroup per row
+        let wg_fft_cols = (1, fft_size, 1); // one workgroup per column
+
+        let fft_passes_to_run = [
+            (ComputePasses::FftTimeEvolve, wg_fft_grid),
+            (ComputePasses::FftIfftRows, wg_fft_rows),
+            (ComputePasses::FftIfftCols, wg_fft_cols),
+            (ComputePasses::FftNormals, wg_fft_grid),
+        ];
+
         // Resolve all pipelines + bind groups; bail if any aren't ready.
-        let mut resolved = Vec::with_capacity(passes_to_run.len());
+        let mut resolved = Vec::with_capacity(passes_to_run.len() + fft_passes_to_run.len());
         for (pass, wg) in &passes_to_run {
             let Some((_, pipeline_id)) = pipelines.passes.get(pass) else { return Ok(()) };
             let Some(pipeline) = pipeline_cache.get_compute_pipeline(*pipeline_id) else { return Ok(()) };
             let Some(bg) = bgs.bind_groups.get(pass) else { return Ok(()) };
+            resolved.push((pass.as_ref(), pipeline, bg, *wg));
+        }
+
+        // FFT passes are optional (bind groups may not be ready yet)
+        for (pass, wg) in &fft_passes_to_run {
+            let Some((_, pipeline_id)) = pipelines.passes.get(pass) else { continue };
+            let Some(pipeline) = pipeline_cache.get_compute_pipeline(*pipeline_id) else { continue };
+            let Some(bg) = bgs.bind_groups.get(pass) else { continue };
             resolved.push((pass.as_ref(), pipeline, bg, *wg));
         }
 
@@ -195,6 +222,31 @@ impl FromWorld for WaterPipelines {
             uniform_buffer::<WaterSettings>(false),
         ));
 
+        // ── FFT Ocean Passes ─────────────────────────────────────────────────
+        compute_pipeline!(passes, ComputePasses::FftTimeEvolve, asset_server, pipeline_cache, (
+            texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // initial_spectrum (Rg32Float)
+            texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // initial_spectrum_conj
+            texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // angular_frequency
+            texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // evolved_out
+            uniform_buffer::<FftOceanSettings>(false),
+        ));
+
+        compute_pipeline!(passes, ComputePasses::FftIfftRows, asset_server, pipeline_cache, (
+            texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // spectrum_in
+            texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // spectrum_out
+        ));
+
+        compute_pipeline!(passes, ComputePasses::FftIfftCols, asset_server, pipeline_cache, (
+            texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // spectrum_in (after row IFFT)
+            texture_storage_2d(TextureFormat::R32Float, StorageTextureAccess::WriteOnly),               // height_out
+        ));
+
+        compute_pipeline!(passes, ComputePasses::FftNormals, asset_server, pipeline_cache, (
+            texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // height_field
+            texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::WriteOnly),            // normal_out
+            uniform_buffer::<FftOceanSettings>(false),
+        ));
+
         Self { passes }
     }
 }
@@ -218,8 +270,9 @@ pub fn queue_bind_groups(
     voxel_handle:  Res<VoxelGridHandle>,
     water_wave_group_speeds:  Res<WaterWaveGroupSpeeds>,
     existing_bgs:  Option<ResMut<WaterBindGroups>>,
-    // hf_handle:     Option<ResMut<HeightFieldHandle>>,
     sim_handle:     Option<ResMut<WaterSimulationHandles>>,
+    fft_handles:   Option<Res<FftOceanHandles>>,
+    fft_settings:  Option<Res<FftOceanSettings>>,
     render_images: Res<RenderAssets<GpuImage>>,
     queue:         Res<bevy::render::renderer::RenderQueue>,
     pipeline_cache: Res<PipelineCache>,
@@ -254,7 +307,9 @@ pub fn queue_bind_groups(
         queue.write_buffer(&bgs.buffers[&Buffers::Settings], 0, &encode_uniform!(&*settings));
         queue.write_buffer(&bgs.buffers[&Buffers::DebugSettings], 0, &encode_uniform!(&*debug_settings));
         queue.write_buffer(&bgs.buffers[&Buffers::VoxelSettings], 0, &encode_uniform!(&*voxel_settings));
-        // WaterWaveGroupSpeeds doesn't change at runtime.
+        if let Some(ref fft_s) = fft_settings {
+            queue.write_buffer(&bgs.buffers[&Buffers::FftOceanSettings], 0, &encode_uniform!(&**fft_s));
+        }
 
         bgs.buffers.clone()
     } else {
@@ -275,6 +330,10 @@ pub fn queue_bind_groups(
         let mut dyn_buf = encase::DynamicUniformBuffer::new_with_alignment(Vec::<u8>::new(), 32);
         dyn_buf.write(&*water_wave_group_speeds).expect("ShaderType write failed");
         bufs.insert(Buffers::WaterWaveGroupSpeeds, mk("water_wave_group_speeds_buf", dyn_buf.into_inner()));
+
+        if let Some(ref fft_s) = fft_settings {
+            bufs.insert(Buffers::FftOceanSettings, mk("fft_ocean_settings_buf", encode_uniform!(&**fft_s)));
+        }
 
         bufs
     };
@@ -342,6 +401,69 @@ pub fn queue_bind_groups(
             settings_buf.as_entire_binding(),
         )),
     ));
+
+    // ── FFT Ocean Bind Groups ────────────────────────────────────────────────
+    if let (Some(fft_h), Some(_fft_s)) = (&fft_handles, &fft_settings) {
+        let fft_ok = render_images.get(&fft_h.initial_spectrum).is_some()
+            && render_images.get(&fft_h.initial_spectrum_conj).is_some()
+            && render_images.get(&fft_h.angular_frequency).is_some()
+            && render_images.get(&fft_h.evolved_spectrum_a).is_some()
+            && render_images.get(&fft_h.evolved_spectrum_b).is_some()
+            && render_images.get(&fft_h.height_field).is_some()
+            && render_images.get(&fft_h.normal_field).is_some()
+            && buffers.contains_key(&Buffers::FftOceanSettings);
+
+        if fft_ok {
+            let init_spec = &render_images.get(&fft_h.initial_spectrum).unwrap().texture_view;
+            let init_conj = &render_images.get(&fft_h.initial_spectrum_conj).unwrap().texture_view;
+            let ang_freq = &render_images.get(&fft_h.angular_frequency).unwrap().texture_view;
+            let evolved_a = &render_images.get(&fft_h.evolved_spectrum_a).unwrap().texture_view;
+            let evolved_b = &render_images.get(&fft_h.evolved_spectrum_b).unwrap().texture_view;
+            let height_fld = &render_images.get(&fft_h.height_field).unwrap().texture_view;
+            let normal_fld = &render_images.get(&fft_h.normal_field).unwrap().texture_view;
+            let fft_settings_buf = &buffers[&Buffers::FftOceanSettings];
+
+            bind_groups.insert(ComputePasses::FftTimeEvolve, device.create_bind_group(
+                "fft_time_evolve_bg",
+                &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftTimeEvolve)),
+                &BindGroupEntries::sequential((
+                    init_spec,
+                    init_conj,
+                    ang_freq,
+                    evolved_a,  // write evolved spectrum to A
+                    fft_settings_buf.as_entire_binding(),
+                )),
+            ));
+
+            bind_groups.insert(ComputePasses::FftIfftRows, device.create_bind_group(
+                "fft_ifft_rows_bg",
+                &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftIfftRows)),
+                &BindGroupEntries::sequential((
+                    evolved_a,  // read from A (output of time evolve)
+                    evolved_b,  // write row IFFT result to B
+                )),
+            ));
+
+            bind_groups.insert(ComputePasses::FftIfftCols, device.create_bind_group(
+                "fft_ifft_cols_bg",
+                &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftIfftCols)),
+                &BindGroupEntries::sequential((
+                    evolved_b,  // read from B (output of row IFFT)
+                    height_fld, // write height field
+                )),
+            ));
+
+            bind_groups.insert(ComputePasses::FftNormals, device.create_bind_group(
+                "fft_normals_bg",
+                &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftNormals)),
+                &BindGroupEntries::sequential((
+                    height_fld,
+                    normal_fld,
+                    fft_settings_buf.as_entire_binding(),
+                )),
+            ));
+        }
+    }
 
     commands.insert_resource(WaterBindGroups { bind_groups, buffers });
 }

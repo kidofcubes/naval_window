@@ -456,10 +456,10 @@ fn main() {
             //     init_paths: data_paths.unwrap(),
             // },
             WireframePlugin::default(),
-            // WaterPlugin,
+            WaterPlugin,
             CameraMovementPlugin,
             MeshPickingPlugin,
-            BigWatering,
+            // BigWatering,
             //OutlinePlugin,
         ))
         .add_systems(Startup, (setup).chain())

@@ -58,6 +58,11 @@ const COLOR_MULTIPLIER: vec4<f32> = vec4<f32>(1.0, 1.0, 1.0, 0.5);
 @group(#{MATERIAL_BIND_GROUP}) @binding(110) var amplitude_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var profile_buffer:     texture_2d<f32>;
 
+@group(#{MATERIAL_BIND_GROUP}) @binding(112) var<uniform> display_mode: u32;
+@group(#{MATERIAL_BIND_GROUP}) @binding(113) var fft_height_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(114) var fft_normal_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(115) var fft_sampler: sampler;
+
 
 fn modulo_f32(x: f32, n: f32) -> f32{
     return x - floor(x / n) * n;
@@ -214,6 +219,27 @@ fn compute_normal(uv: vec2<f32>) -> vec3<f32> {
 }
 
 
+// ── FFT Ocean sampling ──────────────────────────────────────────────────────
+
+fn calculate_fft_water_offset(uv: vec2<f32>) -> vec3<f32> {
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return vec3<f32>(0.0, 0.0, 0.0);
+    }
+    let height = textureSampleLevel(fft_height_texture, fft_sampler, uv, 0.0).x;
+    return vec3<f32>(0.0, height, 0.0);
+}
+
+fn compute_fft_normal(uv: vec2<f32>) -> vec3<f32> {
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return vec3<f32>(0.0, 1.0, 0.0);
+    }
+    let n = textureSampleLevel(fft_normal_texture, fft_sampler, uv, 0.0).xyz;
+    if (n.x == 0.0 && n.y == 0.0 && n.z == 0.0) {
+        return vec3<f32>(0.0, 1.0, 0.0);
+    }
+    return normalize(n);
+}
+
 fn uv_from_world(world_pos: vec3<f32>) -> vec2<f32> {
     return vec2<f32>(
         (world_pos.x / (f32(GRID_X_SIZE) * f32(GRID_SCALE)))+0.5,
@@ -265,8 +291,12 @@ fn translate_vertex(vertex: Vertex) -> VertexOutput {
     var y_offset = 100.0;
 
     // Calculate water displacement using UV coordinates
-    var offset: vec3<f32> = calculate_water_offset(uv_from_world(orig_world_position.xyz)) * 1.0;
-    offset = vec3<f32>(0.0,0.0,0.0);
+    var offset: vec3<f32>;
+    if (display_mode == 1u) {
+        offset = calculate_fft_water_offset(uv_from_world(orig_world_position.xyz));
+    } else {
+        offset = calculate_water_offset(uv_from_world(orig_world_position.xyz));
+    }
 
     let position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);
 
@@ -299,9 +329,13 @@ fn fragment(
 ) -> FragmentOutput {
     var out: FragmentOutput;
     var pbr_input = pbr_input_from_standard_material(in, is_front);
-//    pbr_input.material.base_color.b = 255;
-//#ifdef NORMAL_PREPASS
-    var world_normal = compute_normal(uv_from_world(in.world_position.xyz));
+
+    var world_normal: vec3<f32>;
+    if (display_mode == 1u) {
+        world_normal = compute_fft_normal(uv_from_world(in.world_position.xyz));
+    } else {
+        world_normal = compute_normal(uv_from_world(in.world_position.xyz));
+    }
 //    pbr_input.material.base_color.r = world_normal.x;
 //    pbr_input.material.base_color.g = world_normal.y;
 //    pbr_input.material.base_color.b = world_normal.z;

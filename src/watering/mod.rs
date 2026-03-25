@@ -18,7 +18,7 @@ use crate::BuildData;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::render::render_graph::RenderGraphExt;
 use crate::watering::cpu_debug_impl::CpuDebugWatering;
-use crate::watering::pre_compute::compute_group_speeds;
+use crate::watering::pre_compute::{compute_group_speeds, generate_fft_initial_data};
 use crate::watering::water_lod::WaterLodPlugin;
 
 pub struct Watering;
@@ -70,6 +70,8 @@ impl Plugin for Watering{
                 .add_plugins(ExtractResourcePlugin::<VoxelGridHandle>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterWaveGroupSpeeds>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterSimulationHandles>::default())
+                .add_plugins(ExtractResourcePlugin::<FftOceanSettings>::default())
+                .add_plugins(ExtractResourcePlugin::<FftOceanHandles>::default())
             ;
             let render_app = app.sub_app_mut(RenderApp);
             render_app
@@ -213,26 +215,94 @@ pub fn setup_textures(
         ..default()
     };
 
-    commands.insert_resource(HeightFieldHandle{ 
-        offsets_handle: images.add(offsets_image), 
+    commands.insert_resource(HeightFieldHandle{
+        offsets_handle: images.add(offsets_image),
         normals_handle: images.add(normal_image)
     });
-    
+
     commands.insert_resource(WaterSimulationHandles {
         amplitude_texture_a: images.add(amplitude_image_a),
         amplitude_texture_b: images.add(amplitude_image_b),
         profile_buffer: images.add(profile_image),
         flipped: false
     });
+
+    // ── FFT Ocean Textures ──────────────────────────────────────────────────
+    let fft_size = GRID_X_SIZE as u32; // 256
+
+    let mk_rg32 = |label: &'static str, data: Vec<u8>| Image {
+        texture_descriptor: TextureDescriptor {
+            label: Some(label),
+            size: Extent3d { width: fft_size, height: fft_size, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rg32Float,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
+        },
+        data: Some(data),
+        ..default()
+    };
+
+    let mk_r32 = |label: &'static str, data: Vec<u8>| Image {
+        texture_descriptor: TextureDescriptor {
+            label: Some(label),
+            size: Extent3d { width: fft_size, height: fft_size, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R32Float,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
+        },
+        data: Some(data),
+        ..default()
+    };
+
+    let mk_rgba32 = |label: &'static str| Image {
+        texture_descriptor: TextureDescriptor {
+            label: Some(label),
+            size: Extent3d { width: fft_size, height: fft_size, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba32Float,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
+        },
+        data: Some(vec![0u8; (fft_size * fft_size * 16) as usize]),
+        ..default()
+    };
+
+    let n = (fft_size * fft_size) as usize;
+    let config = pre_compute::FftOceanConfig::default();
+    let (spectrum_bytes, conj_bytes, freq_bytes) = generate_fft_initial_data(&config);
+
+    commands.insert_resource(FftOceanSettings {
+        patch_length: config.patch_length,
+        elapsed_time: 0.0,
+        _padding_a: 0.0,
+        _padding_b: 0.0,
+    });
+
+    commands.insert_resource(FftOceanHandles {
+        initial_spectrum: images.add(mk_rg32("fft_initial_spectrum", spectrum_bytes)),
+        initial_spectrum_conj: images.add(mk_rg32("fft_initial_spectrum_conj", conj_bytes)),
+        angular_frequency: images.add(mk_r32("fft_angular_frequency", freq_bytes)),
+        evolved_spectrum_a: images.add(mk_rg32("fft_evolved_spectrum_a", vec![0u8; n * 8])),
+        evolved_spectrum_b: images.add(mk_rg32("fft_evolved_spectrum_b", vec![0u8; n * 8])),
+        height_field: images.add(mk_r32("fft_height_field", vec![0u8; n * 4])),
+        normal_field: images.add(mk_rgba32("fft_normal_field")),
+    });
 }
 
 // ─── Update Systems ──────────────────────────────────────────────────────────
 
-fn tick_water_time(time: Res<Time>, mut settings: ResMut<WaterSettings>) {
-    // settings.elapsed_time = time.elapsed_secs();
+fn tick_water_time(time: Res<Time>, mut settings: ResMut<WaterSettings>, mut fft_settings: ResMut<FftOceanSettings>) {
     settings.elapsed_time = (time.elapsed_secs()*3.0) + 100.0;
-    // settings.elapsed_time = 0.0;
     settings.delta_time = time.delta_secs()*3.0;
+    fft_settings.elapsed_time = time.elapsed_secs();
 }
 
 fn debug_input_system(
@@ -381,6 +451,27 @@ pub struct WaterSimulationHandles {
     pub amplitude_texture_b: Handle<Image>,
     pub profile_buffer: Handle<Image>,
     pub flipped: bool,
+}
+
+/// FFT ocean GPU settings (extracted to render world as a uniform buffer)
+#[derive(Resource, ExtractResource, Clone, ShaderType)]
+pub struct FftOceanSettings {
+    pub patch_length: f32,
+    pub elapsed_time: f32,
+    pub _padding_a: f32,
+    pub _padding_b: f32,
+}
+
+/// Handles to FFT ocean textures
+#[derive(Resource, ExtractResource, Clone)]
+pub struct FftOceanHandles {
+    pub initial_spectrum: Handle<Image>,
+    pub initial_spectrum_conj: Handle<Image>,
+    pub angular_frequency: Handle<Image>,
+    pub evolved_spectrum_a: Handle<Image>,
+    pub evolved_spectrum_b: Handle<Image>,
+    pub height_field: Handle<Image>,
+    pub normal_field: Handle<Image>,
 }
 
 fn setup_voxel_fallback(mut commands: Commands, mut images: ResMut<Assets<Image>>) {

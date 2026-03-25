@@ -11,7 +11,7 @@ use bevy::shader::{ShaderDefVal, ShaderRef};
 use rand::{random, random_bool, random_range};
 use crate::{watering, BuildData};
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
-use crate::watering::{HeightFieldHandle, VoxelGridHandle, VoxelSettings, Watering, WaterSimulationHandles};
+use crate::watering::{FftOceanHandles, HeightFieldHandle, VoxelGridHandle, VoxelSettings, Watering, WaterSimulationHandles};
 use crate::watering::water_lod::WaterLodPlugin;
 
 const SHADER_ASSET_PATH: &str = "custom_material.wgsl";
@@ -40,11 +40,11 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
-    // mut custom_materials: ResMut<Assets<CustomMaterial>>,
     mut extended_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, CustomMaterial>>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut height_field_handle: ResMut<HeightFieldHandle>,
     water_sim_handles: Res<WaterSimulationHandles>,
+    fft_handles: Res<FftOceanHandles>,
     asset_server: Res<AssetServer>,
 ) {
 
@@ -84,15 +84,15 @@ fn setup(
     // });
 
     let custom_material = CustomMaterial {
-        // color: LinearRgba::BLUE,
-        // color_texture: Some(asset_server.load("yuyuchonk.png")),
-        // alpha_mode: AlphaMode::Blend,
         time: 0.0,
         voxel_transform: Mat4::IDENTITY,
         voxel_size: 0.5,
         voxel_grid: null_texture(images.as_mut(), TextureDimension::D3, TextureFormat::R8Uint),
         amplitude_texture: water_sim_handles.amplitude_texture_a.clone(),
         profile_buffer: water_sim_handles.profile_buffer.clone(),
+        display_mode: 1, // default to FFT ocean
+        fft_height_texture: fft_handles.height_field.clone(),
+        fft_normal_texture: fft_handles.normal_field.clone(),
     };
 
     let material = ExtendedMaterial {
@@ -136,7 +136,6 @@ fn update(
 ){
     sim_handles.flipped = !sim_handles.flipped;
     for (_, mut material) in materials.iter_mut() {
-        // material.time = (time.elapsed().as_nanos() / (1000u128 * 1000u128 * 1000u128)) as f32;
         material.extension.time = (time.elapsed().as_millis() as f32 / 1000.0) as f32;
         if let Some(voxel_grid) = build_data.voxel_grid.as_ref() && key.just_pressed(KeyCode::KeyG) {
             update_material(&mut material.extension, voxel_grid, &mut images)
@@ -145,6 +144,12 @@ fn update(
             sim_handles.amplitude_texture_b.clone()
         } else {
             sim_handles.amplitude_texture_a.clone()
+        };
+
+        // M key toggles display mode between wavelets (0) and FFT ocean (1)
+        if key.just_pressed(KeyCode::KeyM) {
+            material.extension.display_mode = if material.extension.display_mode == 0 { 1 } else { 0 };
+            println!("Display mode: {}", if material.extension.display_mode == 0 { "wavelets" } else { "FFT ocean" });
         }
     }
     // if let Some(voxel_grid) = build_data.voxel_grid.as_ref() && key.just_pressed(KeyCode::KeyG) {
@@ -175,15 +180,24 @@ pub struct CustomMaterial {
     #[uniform(102)]
     voxel_size: f32,
     #[texture(103, dimension = "3d", sample_type = "u_int")]
-    // #[sampler(3)]
     voxel_grid: Handle<Image>,
 
     #[texture(109, dimension = "2d_array", sample_type = "float")]
     #[sampler(110)]
     amplitude_texture: Handle<Image>,
-    
+
     #[texture(111, dimension = "2d", sample_type = "float")]
     profile_buffer: Handle<Image>,
+
+    #[uniform(112)]
+    display_mode: u32, // 0 = wavelets, 1 = FFT ocean
+
+    #[texture(113, dimension = "2d", sample_type = "float")]
+    fft_height_texture: Handle<Image>,
+
+    #[texture(114, dimension = "2d", sample_type = "float")]
+    #[sampler(115)]
+    fft_normal_texture: Handle<Image>,
 }
 
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.
