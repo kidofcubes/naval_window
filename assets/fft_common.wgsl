@@ -5,7 +5,7 @@ const TAU: f32 = 6.28318530717958647692;
 
 struct FftOceanSettings {
     elapsed_time: f32,
-    _padding_a: f32,
+    patch_length: f32,
     _padding_b: f32,
     _padding_c: f32,
 }

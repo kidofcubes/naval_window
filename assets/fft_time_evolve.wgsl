@@ -5,6 +5,7 @@
 @group(0) @binding(2) var angular_frequency: texture_2d<f32>;
 @group(0) @binding(3) var evolved_out: texture_storage_2d<rg32float, write>;
 @group(0) @binding(4) var<uniform> settings: FftOceanSettings;
+@group(0) @binding(5) var slope_out: texture_storage_2d<rg32float, write>;
 
 @compute @workgroup_size(16, 16, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -32,4 +33,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let evolved = complex_mul(h0, exp_pos) + complex_mul(h0_conj, exp_neg);
 
     textureStore(evolved_out, coord, vec4<f32>(evolved, 0.0, 0.0));
+
+    // Slope spectrum C(k) = Sx + i*Sy, packed so IFFT(C).real = slope_x, IFFT(C).imag = slope_z
+    // k_row indexes world-x, k_col indexes world-z (matching pre_compute.rs convention)
+    let k_row = TAU * (f32(row) - 128.0) / settings.patch_length;
+    let k_col = TAU * (f32(col) - 128.0) / settings.patch_length;
+    // Sx = i*k_row*H => Sx_r = -k_row*H_i, Sx_i = k_row*H_r
+    // Sy = i*k_col*H => Sy_r = -k_col*H_i, Sy_i = k_col*H_r
+    // C = Sx + i*Sy => C_r = Sx_r - Sy_i, C_i = Sx_i + Sy_r
+    let c_r = -k_row * evolved.y - k_col * evolved.x;
+    let c_i =  k_row * evolved.x - k_col * evolved.y;
+    textureStore(slope_out, coord, vec4<f32>(c_r, c_i, 0.0, 0.0));
 }

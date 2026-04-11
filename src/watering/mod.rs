@@ -55,17 +55,17 @@ impl Plugin for Watering{
             })
             .insert_resource(FftOceanConfig {
                 grid_size: 256,
-                patch_length: 256.0,
+                patch_length: 16.0,
                 wind_speed: 10.0,
                 wind_dir: Vec2::new(1.0, 0.0).normalize(),
-                amplitude: 0.1,
+                amplitude: 100.0,
                 gravity: 9.81,
                 fetch: 100_000.0,
                 gamma: 3.3,
             })
             .insert_resource(FftOceanSettings {
                 elapsed_time: 0.0,
-                _padding_a: 0.0,
+                patch_length: 16.0,
                 _padding_b: 0.0,
                 _padding_c: 0.0,
             })
@@ -303,15 +303,18 @@ pub fn setup_textures(
         evolved_spectrum_b: images.add(mk_rg32("fft_evolved_spectrum_b", vec![0u8; n * 8])),
         height_field: images.add(mk_r32("fft_height_field", vec![0u8; n * 4])),
         normal_field: images.add(mk_rgba32("fft_normal_field")),
+        slope_spectrum: images.add(mk_rg32("fft_slope_spectrum", vec![0u8; n * 8])),
+        slope_field: images.add(mk_rg32("fft_slope_field", vec![0u8; n * 8])),
     });
 }
 
 // ─── Update Systems ──────────────────────────────────────────────────────────
 
-fn tick_water_time(time: Res<Time>, mut settings: ResMut<WaterSettings>, mut fft_settings: ResMut<FftOceanSettings>) {
+fn tick_water_time(time: Res<Time>, mut settings: ResMut<WaterSettings>, mut fft_settings: ResMut<FftOceanSettings>, fft_config: Res<FftOceanConfig>) {
     settings.elapsed_time = (time.elapsed_secs()*3.0) + 100.0;
     settings.delta_time = time.delta_secs()*3.0;
     fft_settings.elapsed_time = time.elapsed_secs();
+    fft_settings.patch_length = fft_config.patch_length;
 }
 
 fn debug_input_system(
@@ -466,7 +469,7 @@ pub struct WaterSimulationHandles {
 #[derive(Resource, ExtractResource, Clone, ShaderType)]
 pub struct FftOceanSettings {
     pub elapsed_time: f32,
-    pub _padding_a: f32,
+    pub patch_length: f32,
     pub _padding_b: f32,
     pub _padding_c: f32,
 }
@@ -495,6 +498,8 @@ pub struct FftOceanHandles {
     pub evolved_spectrum_b: Handle<Image>,
     pub height_field: Handle<Image>,
     pub normal_field: Handle<Image>,
+    pub slope_spectrum: Handle<Image>,
+    pub slope_field: Handle<Image>,
 }
 
 fn setup_voxel_fallback(mut commands: Commands, mut images: ResMut<Assets<Image>>) {

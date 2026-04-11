@@ -23,12 +23,16 @@ pub enum ComputePasses {
     FftTimeEvolve,
     FftIfftRows,
     FftIfftCols,
-    FftNormals,
+    FftIfftRowsSlope,
+    FftIfftColsSlope,
 }
 
 impl ComputePasses {
     pub fn wgsl_path(&self) -> String {
-        format!("{}.wgsl", self.as_ref())
+        match self {
+            ComputePasses::FftIfftRowsSlope => "fft_ifft_rows.wgsl".to_string(),
+            other => format!("{}.wgsl", other.as_ref()),
+        }
     }
 }
 
@@ -86,10 +90,11 @@ impl render_graph::Node for WaterSimulationNode {
         let wg_fft_cols = (1, fft_size, 1); // one workgroup per column
 
         let fft_passes_to_run = [
-            (ComputePasses::FftTimeEvolve, wg_fft_grid),
-            (ComputePasses::FftIfftRows, wg_fft_rows),
-            (ComputePasses::FftIfftCols, wg_fft_cols),
-            (ComputePasses::FftNormals, wg_fft_grid),
+            (ComputePasses::FftTimeEvolve,    wg_fft_grid),  // H(k,t) → evolved_a, C(k) → slope_spectrum
+            (ComputePasses::FftIfftRows,      wg_fft_rows),  // evolved_a → evolved_b (height row IFFT)
+            (ComputePasses::FftIfftCols,      wg_fft_cols),  // evolved_b → height_field
+            (ComputePasses::FftIfftRowsSlope, wg_fft_rows),  // slope_spectrum → evolved_a (safe reuse)
+            (ComputePasses::FftIfftColsSlope, wg_fft_cols),  // evolved_a → slope_field (sampled per-fragment)
         ];
 
         // Resolve all pipelines + bind groups; bail if any aren't ready.
@@ -229,6 +234,7 @@ impl FromWorld for WaterPipelines {
             texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // angular_frequency
             texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // evolved_out
             uniform_buffer::<FftOceanSettings>(false),
+            texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // slope_out
         ));
 
         compute_pipeline!(passes, ComputePasses::FftIfftRows, asset_server, pipeline_cache, (
@@ -241,10 +247,14 @@ impl FromWorld for WaterPipelines {
             texture_storage_2d(TextureFormat::R32Float, StorageTextureAccess::WriteOnly),               // height_out
         ));
 
-        compute_pipeline!(passes, ComputePasses::FftNormals, asset_server, pipeline_cache, (
-            texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // height_field
-            texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::WriteOnly),            // normal_out
-            uniform_buffer::<FftOceanSettings>(false),
+        compute_pipeline!(passes, ComputePasses::FftIfftRowsSlope, asset_server, pipeline_cache, (
+            texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // slope_spectrum
+            texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // evolved_a (reused)
+        ));
+
+        compute_pipeline!(passes, ComputePasses::FftIfftColsSlope, asset_server, pipeline_cache, (
+            texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // evolved_a (row-IFFT'd slope)
+            texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // slope_field
         ));
 
         Self { passes }
@@ -410,7 +420,8 @@ pub fn queue_bind_groups(
             && render_images.get(&fft_h.evolved_spectrum_a).is_some()
             && render_images.get(&fft_h.evolved_spectrum_b).is_some()
             && render_images.get(&fft_h.height_field).is_some()
-            && render_images.get(&fft_h.normal_field).is_some()
+            && render_images.get(&fft_h.slope_spectrum).is_some()
+            && render_images.get(&fft_h.slope_field).is_some()
             && buffers.contains_key(&Buffers::FftOceanSettings);
 
         if fft_ok {
@@ -420,7 +431,8 @@ pub fn queue_bind_groups(
             let evolved_a = &render_images.get(&fft_h.evolved_spectrum_a).unwrap().texture_view;
             let evolved_b = &render_images.get(&fft_h.evolved_spectrum_b).unwrap().texture_view;
             let height_fld = &render_images.get(&fft_h.height_field).unwrap().texture_view;
-            let normal_fld = &render_images.get(&fft_h.normal_field).unwrap().texture_view;
+            let slope_spec = &render_images.get(&fft_h.slope_spectrum).unwrap().texture_view;
+            let slope_fld = &render_images.get(&fft_h.slope_field).unwrap().texture_view;
             let fft_settings_buf = &buffers[&Buffers::FftOceanSettings];
 
             bind_groups.insert(ComputePasses::FftTimeEvolve, device.create_bind_group(
@@ -432,6 +444,7 @@ pub fn queue_bind_groups(
                     ang_freq,
                     evolved_a,  // write evolved spectrum to A
                     fft_settings_buf.as_entire_binding(),
+                    slope_spec, // write slope spectrum
                 )),
             ));
 
@@ -453,13 +466,21 @@ pub fn queue_bind_groups(
                 )),
             ));
 
-            bind_groups.insert(ComputePasses::FftNormals, device.create_bind_group(
-                "fft_normals_bg",
-                &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftNormals)),
+            bind_groups.insert(ComputePasses::FftIfftRowsSlope, device.create_bind_group(
+                "fft_ifft_rows_slope_bg",
+                &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftIfftRowsSlope)),
                 &BindGroupEntries::sequential((
-                    height_fld,
-                    normal_fld,
-                    fft_settings_buf.as_entire_binding(),
+                    slope_spec,  // read slope spectrum
+                    evolved_a,   // write row-IFFT result back into evolved_a (safe: consumed by FftIfftRows)
+                )),
+            ));
+
+            bind_groups.insert(ComputePasses::FftIfftColsSlope, device.create_bind_group(
+                "fft_ifft_cols_slope_bg",
+                &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftIfftColsSlope)),
+                &BindGroupEntries::sequential((
+                    evolved_a,   // read row-IFFT'd slope spectrum
+                    slope_fld,   // write (slope_x, slope_z) spatial field
                 )),
             ));
         }

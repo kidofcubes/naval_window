@@ -11,7 +11,7 @@ use bevy::shader::{ShaderDefVal, ShaderRef};
 use rand::{random, random_bool, random_range};
 use crate::{watering, BuildData};
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
-use crate::watering::{FftOceanHandles, HeightFieldHandle, VoxelGridHandle, VoxelSettings, Watering, WaterSimulationHandles};
+use crate::watering::{FftOceanConfig, FftOceanHandles, HeightFieldHandle, VoxelGridHandle, VoxelSettings, Watering, WaterSimulationHandles};
 use crate::watering::water_lod::WaterLodPlugin;
 
 const SHADER_ASSET_PATH: &str = "custom_material.wgsl";
@@ -45,6 +45,7 @@ fn setup(
     mut height_field_handle: ResMut<HeightFieldHandle>,
     water_sim_handles: Res<WaterSimulationHandles>,
     fft_handles: Res<FftOceanHandles>,
+    fft_config: Res<FftOceanConfig>,
     asset_server: Res<AssetServer>,
 ) {
 
@@ -92,7 +93,8 @@ fn setup(
         profile_buffer: water_sim_handles.profile_buffer.clone(),
         display_mode: 1, // default to FFT ocean
         fft_height_texture: fft_handles.height_field.clone(),
-        fft_normal_texture: fft_handles.normal_field.clone(),
+        fft_slope_texture: fft_handles.slope_field.clone(),
+        fft_patch_length: fft_config.patch_length,
     };
 
     let material = ExtendedMaterial {
@@ -197,7 +199,10 @@ pub struct CustomMaterial {
 
     #[texture(114, dimension = "2d", sample_type = "float")]
     #[sampler(115)]
-    fft_normal_texture: Handle<Image>,
+    fft_slope_texture: Handle<Image>,
+
+    #[uniform(116)]
+    fft_patch_length: f32,
 }
 
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.
