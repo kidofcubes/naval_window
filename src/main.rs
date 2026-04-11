@@ -99,7 +99,7 @@ fn temp_test_update(
             let config = VoxelizationConfig {
                 resolution: 64,
                 min_voxel_size: Some(0.25),
-                max_voxel_size: Some(0.25),
+                max_voxel_size: Some(1.0),
             };
             
             // Voxelize the meshes
@@ -334,7 +334,7 @@ fn setup(
             maximum_distance: 8192.0,
             // minimum_distance: 8.0,
             // first_cascade_far_bound: 16.0,
-            num_cascades: 6,
+            num_cascades: 4,
             // overlap_proportion: 0.05,
             ..default()
         }.build(),
@@ -452,9 +452,9 @@ fn main() {
         .add_plugins((
             // WebAssetPlugin,
             default_plugins,
-            // NavalSketchPlugin{
-            //     init_paths: data_paths.unwrap(),
-            // },
+            NavalSketchPlugin{
+                init_paths: data_paths.unwrap(),
+            },
             WireframePlugin::default(),
             WaterPlugin,
             CameraMovementPlugin,

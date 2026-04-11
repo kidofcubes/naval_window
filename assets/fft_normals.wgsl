@@ -12,7 +12,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    let cell_size = settings.patch_length / f32(FFT_SIZE);
+//    let cell_size = settings.patch_length / f32(FFT_SIZE);
+    let cell_size = 26.0 / f32(FFT_SIZE);
 
     // Central differences with wrapping
     let left  = textureLoad(height_field, vec2<i32>(i32((col + FFT_SIZE - 1u) % FFT_SIZE), i32(row)), 0).x;

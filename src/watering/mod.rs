@@ -53,6 +53,22 @@ impl Plugin for Watering{
             .insert_resource(WaterWaveGroupSpeeds {
                 wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_ZETA_NUMBERS).iter().map(|x| vec4(*x * GRID_SCALE, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap()
             })
+            .insert_resource(FftOceanConfig {
+                grid_size: 256,
+                patch_length: 256.0,
+                wind_speed: 10.0,
+                wind_dir: Vec2::new(1.0, 0.0).normalize(),
+                amplitude: 0.1,
+                gravity: 9.81,
+                fetch: 100_000.0,
+                gamma: 3.3,
+            })
+            .insert_resource(FftOceanSettings {
+                elapsed_time: 0.0,
+                _padding_a: 0.0,
+                _padding_b: 0.0,
+                _padding_c: 0.0,
+            })
             .insert_resource(VoxelSettings::default())
             .add_systems(Startup, (setup_textures))
             .add_systems(Update, debug_input_system)
@@ -116,6 +132,7 @@ pub fn setup_textures(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
+    fft_ocean_config: Res<FftOceanConfig>,
     // mut water_material: ResMut<Assets<water_stuff::ocean_mesh::WaterMaterial>>,
     // mut hf_handle: ResMut<HeightFieldHandle>,
     // mut commands: Commands,
@@ -276,15 +293,7 @@ pub fn setup_textures(
     };
 
     let n = (fft_size * fft_size) as usize;
-    let config = pre_compute::FftOceanConfig::default();
-    let (spectrum_bytes, conj_bytes, freq_bytes) = generate_fft_initial_data(&config);
-
-    commands.insert_resource(FftOceanSettings {
-        patch_length: config.patch_length,
-        elapsed_time: 0.0,
-        _padding_a: 0.0,
-        _padding_b: 0.0,
-    });
+    let (spectrum_bytes, conj_bytes, freq_bytes) = generate_fft_initial_data(&fft_ocean_config);
 
     commands.insert_resource(FftOceanHandles {
         initial_spectrum: images.add(mk_rg32("fft_initial_spectrum", spectrum_bytes)),
@@ -456,10 +465,24 @@ pub struct WaterSimulationHandles {
 /// FFT ocean GPU settings (extracted to render world as a uniform buffer)
 #[derive(Resource, ExtractResource, Clone, ShaderType)]
 pub struct FftOceanSettings {
-    pub patch_length: f32,
     pub elapsed_time: f32,
     pub _padding_a: f32,
     pub _padding_b: f32,
+    pub _padding_c: f32,
+}
+
+// ─── FFT Ocean Precomputation ────────────────────────────────────────────────
+
+#[derive(Resource)]
+pub struct FftOceanConfig {
+    pub grid_size: u32,
+    pub patch_length: f32,
+    pub wind_speed: f32,
+    pub wind_dir: Vec2,
+    pub amplitude: f32,
+    pub gravity: f32,
+    pub fetch: f32,
+    pub gamma: f32,
 }
 
 /// Handles to FFT ocean textures

@@ -4,10 +4,10 @@ const PI: f32 = 3.14159265358979323846;
 const TAU: f32 = 6.28318530717958647692;
 
 struct FftOceanSettings {
-    patch_length: f32,
     elapsed_time: f32,
     _padding_a: f32,
     _padding_b: f32,
+    _padding_c: f32,
 }
 
 fn complex_mul(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {

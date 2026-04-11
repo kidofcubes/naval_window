@@ -2,6 +2,7 @@ use std::f32::consts::{PI, TAU};
 use bevy::prelude::*;
 use num_complex::Complex32;
 use rand::Rng;
+use crate::watering::FftOceanConfig;
 
 pub fn compute_group_speeds(min_zeta: f32, max_zeta: f32, wind_speed: f32, zeta_count: usize) -> Vec<f32> {
     let d_zeta = (max_zeta - min_zeta) / (zeta_count as f32);
@@ -46,34 +47,6 @@ pub fn wave_energy_density(zeta: f32, wind_speed: f32) -> f32 {
     let a = 1.1f32.powf(1.5f32 * zeta);
     let b = f32::exp(-1.8038897788076411 * 4f32.powf(zeta) / wind_speed.powf(4f32));
     return 0.139098 * f32::sqrt(a * b);
-}
-
-// ─── FFT Ocean Precomputation ────────────────────────────────────────────────
-
-pub struct FftOceanConfig {
-    pub grid_size: usize,
-    pub patch_length: f32,
-    pub wind_speed: f32,
-    pub wind_dir: Vec2,
-    pub amplitude: f32,
-    pub gravity: f32,
-    pub fetch: f32,
-    pub gamma: f32,
-}
-
-impl Default for FftOceanConfig {
-    fn default() -> Self {
-        Self {
-            grid_size: 256,
-            patch_length: 256.0,
-            wind_speed: 10.0,
-            wind_dir: Vec2::new(1.0, 0.0).normalize(),
-            amplitude: 0.01,
-            gravity: 9.81,
-            fetch: 100_000.0,
-            gamma: 3.3,
-        }
-    }
 }
 
 fn jonswap_spectrum(kx: f32, kz: f32, config: &FftOceanConfig) -> f32 {
@@ -128,7 +101,7 @@ fn box_muller(rng: &mut impl Rng) -> Complex32 {
 /// for 256x256 textures. Spectrum textures are Rg32Float (2 floats per texel),
 /// angular frequency is R32Float (1 float per texel).
 pub fn generate_fft_initial_data(config: &FftOceanConfig) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-    let grid_size = config.grid_size;
+    let grid_size = config.grid_size as usize;
     let patch_length = config.patch_length;
     let gravity = config.gravity;
     let half_grid = (grid_size / 2) as f32;
