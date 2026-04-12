@@ -309,6 +309,8 @@ pub fn setup_textures(
             height_field:          images.add(mk_r32 (format!("fft_height_{i}"),      vec![0u8; n * 4])),
             slope_spectrum:        images.add(mk_rg32(format!("fft_slope_spec_{i}"),  vec![0u8; n * 8])),
             slope_field:           images.add(mk_rg32(format!("fft_slope_{i}"),       vec![0u8; n * 8])),
+            displacement_spectrum: images.add(mk_rg32(format!("fft_disp_spec_{i}"),  vec![0u8; n * 8])),
+            displacement_field:    images.add(mk_rg32(format!("fft_disp_{i}"),       vec![0u8; n * 8])),
         });
     }
     let cascades: [FftCascadeHandles; FFT_CASCADE_COUNT] = match cascade_vec.try_into() {
@@ -395,7 +397,7 @@ pub const GRID_Z_SIZE: usize = 256;
 pub const GRID_SCALE: f32 = 1.0; //how many meters each grid cell represents
 
 pub const FFT_CASCADE_COUNT: usize = 3;
-pub const FFT_PATCH_LENGTHS: [f32; FFT_CASCADE_COUNT] = [256.0, 32.0, 4.0];
+pub const FFT_PATCH_LENGTHS: [f32; FFT_CASCADE_COUNT] = [128.0, 64.0, 32.0];
 
 // pub const DIRECTIONS: usize = 1;
 pub const DIRECTIONS: usize = 32;
@@ -516,14 +518,16 @@ pub struct FftOceanConfig {
 /// Per-cascade FFT ocean texture handles
 #[derive(Clone)]
 pub struct FftCascadeHandles {
-    pub initial_spectrum:      Handle<Image>,
-    pub initial_spectrum_conj: Handle<Image>,
-    pub angular_frequency:     Handle<Image>,
-    pub evolved_spectrum_a:    Handle<Image>,
-    pub evolved_spectrum_b:    Handle<Image>,
-    pub height_field:          Handle<Image>,
-    pub slope_spectrum:        Handle<Image>,
-    pub slope_field:           Handle<Image>,
+    pub initial_spectrum:       Handle<Image>,
+    pub initial_spectrum_conj:  Handle<Image>,
+    pub angular_frequency:      Handle<Image>,
+    pub evolved_spectrum_a:     Handle<Image>,
+    pub evolved_spectrum_b:     Handle<Image>,
+    pub height_field:           Handle<Image>,
+    pub slope_spectrum:         Handle<Image>,
+    pub slope_field:            Handle<Image>,
+    pub displacement_spectrum:  Handle<Image>,
+    pub displacement_field:     Handle<Image>,
 }
 
 /// Handles to FFT ocean textures (all cascades)

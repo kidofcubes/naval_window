@@ -67,6 +67,13 @@ const COLOR_MULTIPLIER: vec4<f32> = vec4<f32>(1.0, 1.0, 1.0, 0.5);
 @group(#{MATERIAL_BIND_GROUP}) @binding(118) var fft_height_2: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(119) var fft_slope_2: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(120) var<uniform> fft_patch_lengths: vec3<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(121) var fft_disp_0: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(122) var fft_disp_1: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(123) var fft_disp_2: texture_2d<f32>;
+
+// Scale factor for horizontal displacement. 1.0 = full Gerstner choppiness.
+// Reduce if you see wave crest folding/self-intersection.
+const FFT_CHOPPINESS: f32 = 1.0;
 
 
 fn modulo_f32(x: f32, n: f32) -> f32{
@@ -234,7 +241,11 @@ fn calculate_fft_water_offset(world_pos: vec3<f32>) -> vec3<f32> {
     let h0 = textureSampleLevel(fft_height_0, fft_sampler, fft_uv(world_pos, fft_patch_lengths.x), 0.0).r;
     let h1 = textureSampleLevel(fft_height_1, fft_sampler, fft_uv(world_pos, fft_patch_lengths.y), 0.0).r;
     let h2 = textureSampleLevel(fft_height_2, fft_sampler, fft_uv(world_pos, fft_patch_lengths.z), 0.0).r;
-    return vec3<f32>(0.0, h0 + h1 + h2, 0.0);
+    let d0 = textureSampleLevel(fft_disp_0, fft_sampler, fft_uv(world_pos, fft_patch_lengths.x), 0.0).rg;
+    let d1 = textureSampleLevel(fft_disp_1, fft_sampler, fft_uv(world_pos, fft_patch_lengths.y), 0.0).rg;
+    let d2 = textureSampleLevel(fft_disp_2, fft_sampler, fft_uv(world_pos, fft_patch_lengths.z), 0.0).rg;
+    let disp = (d0 + d1 + d2) * FFT_CHOPPINESS;
+    return vec3<f32>(disp.x, h0 + h1 + h2, disp.y);
 }
 
 fn compute_fft_normal(world_pos: vec3<f32>) -> vec3<f32> {

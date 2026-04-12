@@ -6,6 +6,7 @@
 @group(0) @binding(3) var evolved_out: texture_storage_2d<rg32float, write>;
 @group(0) @binding(4) var<uniform> settings: FftOceanSettings;
 @group(0) @binding(5) var slope_out: texture_storage_2d<rg32float, write>;
+@group(0) @binding(6) var disp_out:  texture_storage_2d<rg32float, write>;
 
 @compute @workgroup_size(16, 16, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -44,4 +45,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let c_r = -k_row * evolved.y - k_col * evolved.x;
     let c_i =  k_row * evolved.x - k_col * evolved.y;
     textureStore(slope_out, coord, vec4<f32>(c_r, c_i, 0.0, 0.0));
+
+    // Horizontal displacement spectrum D(k) = C(k) / |k|
+    // D = Dx + i*Dz, IFFT(D).rg = (dx, dz) spatial displacement
+    let k_len = sqrt(k_row * k_row + k_col * k_col);
+    if k_len > 1e-6 {
+        textureStore(disp_out, coord, vec4<f32>(c_r / k_len, c_i / k_len, 0.0, 0.0));
+    } else {
+        textureStore(disp_out, coord, vec4<f32>(0.0, 0.0, 0.0, 0.0));
+    }
 }

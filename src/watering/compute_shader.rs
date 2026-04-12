@@ -25,12 +25,15 @@ pub enum ComputePasses {
     FftIfftCols,
     FftIfftRowsSlope,
     FftIfftColsSlope,
+    FftIfftRowsDisp,
+    FftIfftColsDisp,
 }
 
 impl ComputePasses {
     pub fn wgsl_path(&self) -> String {
         match self {
-            ComputePasses::FftIfftRowsSlope => "fft_ifft_rows.wgsl".to_string(),
+            ComputePasses::FftIfftRowsSlope | ComputePasses::FftIfftRowsDisp => "fft_ifft_rows.wgsl".to_string(),
+            ComputePasses::FftIfftColsDisp => "fft_ifft_cols_slope.wgsl".to_string(),
             other => format!("{}.wgsl", other.as_ref()),
         }
     }
@@ -98,7 +101,7 @@ impl render_graph::Node for WaterSimulationNode {
         let wg_fft_cols = (1, fft_size, 1); // one workgroup per column
 
         // Resolve all pipelines + bind groups; bail if any aren't ready.
-        let mut resolved = Vec::with_capacity(passes_to_run.len() + FFT_CASCADE_COUNT * 5);
+        let mut resolved = Vec::with_capacity(passes_to_run.len() + FFT_CASCADE_COUNT * 7);
         for (pass, wg) in &passes_to_run {
             let Some((_, pipeline_id)) = pipelines.passes.get(pass) else { return Ok(()) };
             let Some(pipeline) = pipeline_cache.get_compute_pipeline(*pipeline_id) else { return Ok(()) };
@@ -113,6 +116,8 @@ impl render_graph::Node for WaterSimulationNode {
             (ComputePasses::FftIfftCols,      wg_fft_cols),
             (ComputePasses::FftIfftRowsSlope, wg_fft_rows),
             (ComputePasses::FftIfftColsSlope, wg_fft_cols),
+            (ComputePasses::FftIfftRowsDisp,  wg_fft_rows),
+            (ComputePasses::FftIfftColsDisp,  wg_fft_cols),
         ];
         // Resolve pipelines once (shared across all cascades)
         let fft_pipelines: Vec<Option<&_>> = fft_pass_order.iter().map(|(pass, _)| {
@@ -127,6 +132,8 @@ impl render_graph::Node for WaterSimulationNode {
                 &cascade_bgs.ifft_cols,
                 &cascade_bgs.ifft_rows_slope,
                 &cascade_bgs.ifft_cols_slope,
+                &cascade_bgs.ifft_rows_disp,
+                &cascade_bgs.ifft_cols_disp,
             ];
             for (idx, (_, wg)) in fft_pass_order.iter().enumerate() {
                 let Some(pipeline) = fft_pipelines[idx] else { continue };
@@ -255,6 +262,7 @@ impl FromWorld for WaterPipelines {
             texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // evolved_out
             uniform_buffer::<FftOceanSettings>(false),
             texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // slope_out
+            texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // disp_out
         ));
 
         compute_pipeline!(passes, ComputePasses::FftIfftRows, asset_server, pipeline_cache, (
@@ -277,6 +285,16 @@ impl FromWorld for WaterPipelines {
             texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // slope_field
         ));
 
+        compute_pipeline!(passes, ComputePasses::FftIfftRowsDisp, asset_server, pipeline_cache, (
+            texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // displacement_spectrum
+            texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // evolved_b (reused, safe after FftIfftCols)
+        ));
+
+        compute_pipeline!(passes, ComputePasses::FftIfftColsDisp, asset_server, pipeline_cache, (
+            texture_2d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),  // evolved_b (row-IFFT'd displacement)
+            texture_storage_2d(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),              // displacement_field
+        ));
+
         Self { passes }
     }
 }
@@ -289,6 +307,8 @@ pub struct FftCascadeBindGroups {
     pub ifft_cols: BindGroup,
     pub ifft_rows_slope: BindGroup,
     pub ifft_cols_slope: BindGroup,
+    pub ifft_rows_disp: BindGroup,
+    pub ifft_cols_disp: BindGroup,
 }
 
 #[derive(Resource)]
@@ -463,6 +483,8 @@ pub fn queue_bind_groups(
                 && render_images.get(&c.height_field).is_some()
                 && render_images.get(&c.slope_spectrum).is_some()
                 && render_images.get(&c.slope_field).is_some()
+                && render_images.get(&c.displacement_spectrum).is_some()
+                && render_images.get(&c.displacement_field).is_some()
                 && buffers.contains_key(&FFT_SETTINGS_BUFFERS[i]);
 
             if !cascade_ready { break; }
@@ -475,6 +497,8 @@ pub fn queue_bind_groups(
             let height_fld = &render_images.get(&c.height_field).unwrap().texture_view;
             let slope_spec = &render_images.get(&c.slope_spectrum).unwrap().texture_view;
             let slope_fld  = &render_images.get(&c.slope_field).unwrap().texture_view;
+            let disp_spec  = &render_images.get(&c.displacement_spectrum).unwrap().texture_view;
+            let disp_fld   = &render_images.get(&c.displacement_field).unwrap().texture_view;
             let fft_settings_buf = &buffers[&FFT_SETTINGS_BUFFERS[i]];
 
             let time_evolve = device.create_bind_group(
@@ -487,6 +511,7 @@ pub fn queue_bind_groups(
                     evolved_a,
                     fft_settings_buf.as_entire_binding(),
                     slope_spec,
+                    disp_spec,
                 )),
             );
 
@@ -514,12 +539,26 @@ pub fn queue_bind_groups(
                 &BindGroupEntries::sequential((evolved_a, slope_fld)),
             );
 
+            let ifft_rows_disp = device.create_bind_group(
+                "fft_ifft_rows_disp_bg",
+                &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftIfftRowsDisp)),
+                &BindGroupEntries::sequential((disp_spec, evolved_b)),
+            );
+
+            let ifft_cols_disp = device.create_bind_group(
+                "fft_ifft_cols_disp_bg",
+                &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftIfftColsDisp)),
+                &BindGroupEntries::sequential((evolved_b, disp_fld)),
+            );
+
             fft_cascade_bgs.push(FftCascadeBindGroups {
                 time_evolve,
                 ifft_rows,
                 ifft_cols,
                 ifft_rows_slope,
                 ifft_cols_slope,
+                ifft_rows_disp,
+                ifft_cols_disp,
             });
         }
     }

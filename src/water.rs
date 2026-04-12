@@ -5,6 +5,7 @@ use bevy::light::NotShadowCaster;
 // use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, MeshVertexAttribute, MeshVertexBufferLayoutRef, PrimitiveTopology, VertexFormat};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPipeline, MaterialPipelineKey, OpaqueRendererMethod};
+use bevy::pbr::wireframe::Wireframe;
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension, TextureFormat};
 use bevy::shader::{ShaderDefVal, ShaderRef};
@@ -103,6 +104,9 @@ fn setup(
             fft_config.patch_lengths[1],
             fft_config.patch_lengths[2],
         ),
+        fft_disp_0: fft_handles.cascades[0].displacement_field.clone(),
+        fft_disp_1: fft_handles.cascades[1].displacement_field.clone(),
+        fft_disp_2: fft_handles.cascades[2].displacement_field.clone(),
     };
 
     let material = ExtendedMaterial {
@@ -127,7 +131,8 @@ fn setup(
         // NoFrustumCulling,
         Transform::from_xyz(0.0, -100.0, 0.0),
         water_lod_mesh,
-        NotShadowCaster
+        NotShadowCaster,
+        Wireframe
     ));
     // commands.insert_resource(wake_sim);
 }
@@ -223,6 +228,14 @@ pub struct CustomMaterial {
 
     #[uniform(120)]
     fft_patch_lengths: Vec3,
+
+    // Horizontal displacement fields (Gerstner-style XZ displacement)
+    #[texture(121, dimension = "2d", sample_type = "float")]
+    fft_disp_0: Handle<Image>,
+    #[texture(122, dimension = "2d", sample_type = "float")]
+    fft_disp_1: Handle<Image>,
+    #[texture(123, dimension = "2d", sample_type = "float")]
+    fft_disp_2: Handle<Image>,
 }
 
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.

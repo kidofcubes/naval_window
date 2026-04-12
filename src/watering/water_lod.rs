@@ -28,18 +28,18 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 /// Increasing this raises per-patch detail but also per-patch triangle count.
 // const PATCH_VERTS: usize = 17;
 // const PATCH_VERTS: usize = 9;
-const PATCH_VERTS: usize = 3;
+const PATCH_VERTS: usize = 17;
 
 /// Total world-space width/height of the water plane in meters.
-pub const WATER_SIZE: f32 = 16384.0;
+pub const WATER_SIZE: f32 = 8192.0;
 
 /// Maximum quadtree depth. At level N, patch world size = WATER_SIZE / 2^N.
 /// With WATER_SIZE = 4096 and MAX_LEVELS = 7, finest patches are 32 m wide.
-const MAX_LEVELS: u32 = 15;
+const MAX_LEVELS: u32 = 10;
 
 /// Subdivide a node when the camera is closer than node.size × SPLIT_FACTOR.
 /// Increase to subdivide more aggressively (more triangles near camera).
-const SPLIT_FACTOR: f32 = 32.0;
+const SPLIT_FACTOR: f32 = 8.0;
 
 /// Depth the skirt curtain extends below y = 0 to hide LOD cracks.
 /// Should be deeper than your maximum wave trough displacement.
