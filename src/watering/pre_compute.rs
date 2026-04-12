@@ -100,9 +100,8 @@ fn box_muller(rng: &mut impl Rng) -> Complex32 {
 /// Returns (initial_spectrum_bytes, initial_spectrum_conj_bytes, angular_frequency_bytes)
 /// for 256x256 textures. Spectrum textures are Rg32Float (2 floats per texel),
 /// angular frequency is R32Float (1 float per texel).
-pub fn generate_fft_initial_data(config: &FftOceanConfig) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+pub fn generate_fft_initial_data(config: &FftOceanConfig, patch_length: f32) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let grid_size = config.grid_size as usize;
-    let patch_length = config.patch_length;
     let gravity = config.gravity;
     let half_grid = (grid_size / 2) as f32;
 

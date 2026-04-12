@@ -59,10 +59,14 @@ const COLOR_MULTIPLIER: vec4<f32> = vec4<f32>(1.0, 1.0, 1.0, 0.5);
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var profile_buffer:     texture_2d<f32>;
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(112) var<uniform> display_mode: u32;
-@group(#{MATERIAL_BIND_GROUP}) @binding(113) var fft_height_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(114) var fft_slope_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(113) var fft_height_0: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(114) var fft_slope_0: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(115) var fft_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(116) var<uniform> fft_patch_length: f32;
+@group(#{MATERIAL_BIND_GROUP}) @binding(116) var fft_height_1: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(117) var fft_slope_1: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(118) var fft_height_2: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(119) var fft_slope_2: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(120) var<uniform> fft_patch_lengths: vec3<f32>;
 
 
 fn modulo_f32(x: f32, n: f32) -> f32{
@@ -220,17 +224,24 @@ fn compute_normal(uv: vec2<f32>) -> vec3<f32> {
 }
 
 
-// ── FFT Ocean sampling ──────────────────────────────────────────────────────
+// ── FFT Ocean sampling (multi-cascade) ─────────────────────────────────────
+
+fn fft_uv(world_pos: vec3<f32>, patch_length: f32) -> vec2<f32> {
+    return fract(world_pos.xz / patch_length);
+}
 
 fn calculate_fft_water_offset(world_pos: vec3<f32>) -> vec3<f32> {
-    let uv = fft_uv_from_world(world_pos);
-    let height = textureSampleLevel(fft_height_texture, fft_sampler, uv, 0.0).x;
-    return vec3<f32>(0.0, height, 0.0);
+    let h0 = textureSampleLevel(fft_height_0, fft_sampler, fft_uv(world_pos, fft_patch_lengths.x), 0.0).r;
+    let h1 = textureSampleLevel(fft_height_1, fft_sampler, fft_uv(world_pos, fft_patch_lengths.y), 0.0).r;
+    let h2 = textureSampleLevel(fft_height_2, fft_sampler, fft_uv(world_pos, fft_patch_lengths.z), 0.0).r;
+    return vec3<f32>(0.0, h0 + h1 + h2, 0.0);
 }
 
 fn compute_fft_normal(world_pos: vec3<f32>) -> vec3<f32> {
-    let uv = fft_uv_from_world(world_pos);
-    let slopes = textureSampleLevel(fft_slope_texture, fft_sampler, uv, 0.0).xy;
+    let s0 = textureSampleLevel(fft_slope_0, fft_sampler, fft_uv(world_pos, fft_patch_lengths.x), 0.0).xy;
+    let s1 = textureSampleLevel(fft_slope_1, fft_sampler, fft_uv(world_pos, fft_patch_lengths.y), 0.0).xy;
+    let s2 = textureSampleLevel(fft_slope_2, fft_sampler, fft_uv(world_pos, fft_patch_lengths.z), 0.0).xy;
+    let slopes = s0 + s1 + s2;
     return normalize(vec3<f32>(-slopes.x, 1.0, -slopes.y));
 }
 
@@ -239,11 +250,6 @@ fn uv_from_world(world_pos: vec3<f32>) -> vec2<f32> {
         (world_pos.x / (f32(GRID_X_SIZE) * f32(GRID_SCALE)))+0.5,
         (world_pos.z / (f32(GRID_Z_SIZE) * f32(GRID_SCALE)))+0.5
     );
-}
-
-// Tiling UV for FFT textures: divides by patch_length and wraps.
-fn fft_uv_from_world(world_pos: vec3<f32>) -> vec2<f32> {
-    return fract(vec2<f32>(world_pos.x, world_pos.z) / fft_patch_length);
 }
 
 // f0 for water is ~0.02 — the reflectance at normal incidence.

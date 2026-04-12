@@ -55,19 +55,21 @@ impl Plugin for Watering{
             })
             .insert_resource(FftOceanConfig {
                 grid_size: 256,
-                patch_length: 16.0,
+                patch_lengths: FFT_PATCH_LENGTHS,
                 wind_speed: 10.0,
                 wind_dir: Vec2::new(1.0, 0.0).normalize(),
-                amplitude: 100.0,
+                amplitude: 0.1,
                 gravity: 9.81,
                 fetch: 100_000.0,
                 gamma: 3.3,
             })
-            .insert_resource(FftOceanSettings {
-                elapsed_time: 0.0,
-                patch_length: 16.0,
-                _padding_b: 0.0,
-                _padding_c: 0.0,
+            .insert_resource(FftOceanSettingsArray {
+                cascades: std::array::from_fn(|i| FftOceanSettings {
+                    elapsed_time: 0.0,
+                    patch_length: FFT_PATCH_LENGTHS[i],
+                    _padding_b: 0.0,
+                    _padding_c: 0.0,
+                }),
             })
             .insert_resource(VoxelSettings::default())
             .add_systems(Startup, (setup_textures))
@@ -86,7 +88,7 @@ impl Plugin for Watering{
                 .add_plugins(ExtractResourcePlugin::<VoxelGridHandle>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterWaveGroupSpeeds>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterSimulationHandles>::default())
-                .add_plugins(ExtractResourcePlugin::<FftOceanSettings>::default())
+                .add_plugins(ExtractResourcePlugin::<FftOceanSettingsArray>::default())
                 .add_plugins(ExtractResourcePlugin::<FftOceanHandles>::default())
             ;
             let render_app = app.sub_app_mut(RenderApp);
@@ -247,9 +249,9 @@ pub fn setup_textures(
     // ── FFT Ocean Textures ──────────────────────────────────────────────────
     let fft_size = GRID_X_SIZE as u32; // 256
 
-    let mk_rg32 = |label: &'static str, data: Vec<u8>| Image {
+    let mk_rg32 = |label: String, data: Vec<u8>| Image {
         texture_descriptor: TextureDescriptor {
-            label: Some(label),
+            label: Some(Box::leak(label.into_boxed_str())),
             size: Extent3d { width: fft_size, height: fft_size, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
@@ -262,9 +264,9 @@ pub fn setup_textures(
         ..default()
     };
 
-    let mk_r32 = |label: &'static str, data: Vec<u8>| Image {
+    let mk_r32 = |label: String, data: Vec<u8>| Image {
         texture_descriptor: TextureDescriptor {
-            label: Some(label),
+            label: Some(Box::leak(label.into_boxed_str())),
             size: Extent3d { width: fft_size, height: fft_size, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
@@ -293,28 +295,48 @@ pub fn setup_textures(
     };
 
     let n = (fft_size * fft_size) as usize;
-    let (spectrum_bytes, conj_bytes, freq_bytes) = generate_fft_initial_data(&fft_ocean_config);
+
+    let mut cascade_vec: Vec<FftCascadeHandles> = Vec::with_capacity(FFT_CASCADE_COUNT);
+    for i in 0..FFT_CASCADE_COUNT {
+        let patch_len = fft_ocean_config.patch_lengths[i];
+        let (spectrum_bytes, conj_bytes, freq_bytes) = generate_fft_initial_data(&fft_ocean_config, patch_len);
+        cascade_vec.push(FftCascadeHandles {
+            initial_spectrum:      images.add(mk_rg32(format!("fft_init_spec_{i}"),   spectrum_bytes)),
+            initial_spectrum_conj: images.add(mk_rg32(format!("fft_init_conj_{i}"),   conj_bytes)),
+            angular_frequency:     images.add(mk_r32 (format!("fft_angular_{i}"),     freq_bytes)),
+            evolved_spectrum_a:    images.add(mk_rg32(format!("fft_evolved_a_{i}"),   vec![0u8; n * 8])),
+            evolved_spectrum_b:    images.add(mk_rg32(format!("fft_evolved_b_{i}"),   vec![0u8; n * 8])),
+            height_field:          images.add(mk_r32 (format!("fft_height_{i}"),      vec![0u8; n * 4])),
+            slope_spectrum:        images.add(mk_rg32(format!("fft_slope_spec_{i}"),  vec![0u8; n * 8])),
+            slope_field:           images.add(mk_rg32(format!("fft_slope_{i}"),       vec![0u8; n * 8])),
+        });
+    }
+    let cascades: [FftCascadeHandles; FFT_CASCADE_COUNT] = match cascade_vec.try_into() {
+        Ok(arr) => arr,
+        Err(_) => panic!("cascade count mismatch"),
+    };
 
     commands.insert_resource(FftOceanHandles {
-        initial_spectrum: images.add(mk_rg32("fft_initial_spectrum", spectrum_bytes)),
-        initial_spectrum_conj: images.add(mk_rg32("fft_initial_spectrum_conj", conj_bytes)),
-        angular_frequency: images.add(mk_r32("fft_angular_frequency", freq_bytes)),
-        evolved_spectrum_a: images.add(mk_rg32("fft_evolved_spectrum_a", vec![0u8; n * 8])),
-        evolved_spectrum_b: images.add(mk_rg32("fft_evolved_spectrum_b", vec![0u8; n * 8])),
-        height_field: images.add(mk_r32("fft_height_field", vec![0u8; n * 4])),
+        cascades,
         normal_field: images.add(mk_rgba32("fft_normal_field")),
-        slope_spectrum: images.add(mk_rg32("fft_slope_spectrum", vec![0u8; n * 8])),
-        slope_field: images.add(mk_rg32("fft_slope_field", vec![0u8; n * 8])),
     });
 }
 
 // ─── Update Systems ──────────────────────────────────────────────────────────
 
-fn tick_water_time(time: Res<Time>, mut settings: ResMut<WaterSettings>, mut fft_settings: ResMut<FftOceanSettings>, fft_config: Res<FftOceanConfig>) {
+fn tick_water_time(
+    time: Res<Time>,
+    mut settings: ResMut<WaterSettings>,
+    mut fft_settings_array: ResMut<FftOceanSettingsArray>,
+    fft_config: Res<FftOceanConfig>,
+) {
     settings.elapsed_time = (time.elapsed_secs()*3.0) + 100.0;
     settings.delta_time = time.delta_secs()*3.0;
-    fft_settings.elapsed_time = time.elapsed_secs();
-    fft_settings.patch_length = fft_config.patch_length;
+    let elapsed = time.elapsed_secs();
+    for i in 0..FFT_CASCADE_COUNT {
+        fft_settings_array.cascades[i].elapsed_time = elapsed;
+        fft_settings_array.cascades[i].patch_length = fft_config.patch_lengths[i];
+    }
 }
 
 fn debug_input_system(
@@ -371,6 +393,9 @@ fn debug_input_system(
 pub const GRID_X_SIZE: usize = 256;
 pub const GRID_Z_SIZE: usize = 256;
 pub const GRID_SCALE: f32 = 1.0; //how many meters each grid cell represents
+
+pub const FFT_CASCADE_COUNT: usize = 3;
+pub const FFT_PATCH_LENGTHS: [f32; FFT_CASCADE_COUNT] = [256.0, 32.0, 4.0];
 
 // pub const DIRECTIONS: usize = 1;
 pub const DIRECTIONS: usize = 32;
@@ -479,7 +504,7 @@ pub struct FftOceanSettings {
 #[derive(Resource)]
 pub struct FftOceanConfig {
     pub grid_size: u32,
-    pub patch_length: f32,
+    pub patch_lengths: [f32; FFT_CASCADE_COUNT],
     pub wind_speed: f32,
     pub wind_dir: Vec2,
     pub amplitude: f32,
@@ -488,18 +513,30 @@ pub struct FftOceanConfig {
     pub gamma: f32,
 }
 
-/// Handles to FFT ocean textures
+/// Per-cascade FFT ocean texture handles
+#[derive(Clone)]
+pub struct FftCascadeHandles {
+    pub initial_spectrum:      Handle<Image>,
+    pub initial_spectrum_conj: Handle<Image>,
+    pub angular_frequency:     Handle<Image>,
+    pub evolved_spectrum_a:    Handle<Image>,
+    pub evolved_spectrum_b:    Handle<Image>,
+    pub height_field:          Handle<Image>,
+    pub slope_spectrum:        Handle<Image>,
+    pub slope_field:           Handle<Image>,
+}
+
+/// Handles to FFT ocean textures (all cascades)
 #[derive(Resource, ExtractResource, Clone)]
 pub struct FftOceanHandles {
-    pub initial_spectrum: Handle<Image>,
-    pub initial_spectrum_conj: Handle<Image>,
-    pub angular_frequency: Handle<Image>,
-    pub evolved_spectrum_a: Handle<Image>,
-    pub evolved_spectrum_b: Handle<Image>,
-    pub height_field: Handle<Image>,
+    pub cascades: [FftCascadeHandles; FFT_CASCADE_COUNT],
     pub normal_field: Handle<Image>,
-    pub slope_spectrum: Handle<Image>,
-    pub slope_field: Handle<Image>,
+}
+
+/// Per-cascade FFT settings (one FftOceanSettings per cascade, extracted to render world)
+#[derive(Resource, ExtractResource, Clone)]
+pub struct FftOceanSettingsArray {
+    pub cascades: [FftOceanSettings; FFT_CASCADE_COUNT],
 }
 
 fn setup_voxel_fallback(mut commands: Commands, mut images: ResMut<Assets<Image>>) {

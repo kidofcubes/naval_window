@@ -9,7 +9,7 @@ use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
 use strum::AsRefStr;
 use bevy::render::render_resource::binding_types::texture_2d;
-use crate::watering::{FftOceanHandles, FftOceanSettings, VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, WaterSimulationHandles};
+use crate::watering::{FftCascadeHandles, FftOceanHandles, FftOceanSettings, FftOceanSettingsArray, VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, FFT_CASCADE_COUNT, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, WaterSimulationHandles};
 
 // ─── Pass / Buffer Enums ─────────────────────────────────────────────────────
 
@@ -43,8 +43,16 @@ pub enum Buffers {
     DebugSettings,
     VoxelSettings,
     WaterWaveGroupSpeeds,
-    FftOceanSettings,
+    FftOceanSettings0,
+    FftOceanSettings1,
+    FftOceanSettings2,
 }
+
+const FFT_SETTINGS_BUFFERS: [Buffers; FFT_CASCADE_COUNT] = [
+    Buffers::FftOceanSettings0,
+    Buffers::FftOceanSettings1,
+    Buffers::FftOceanSettings2,
+];
 
 // ─── GPU Resources ────────────────────────────────────────────────────────────
 
@@ -89,16 +97,8 @@ impl render_graph::Node for WaterSimulationNode {
         let wg_fft_rows = (1, fft_size, 1); // one workgroup per row
         let wg_fft_cols = (1, fft_size, 1); // one workgroup per column
 
-        let fft_passes_to_run = [
-            (ComputePasses::FftTimeEvolve,    wg_fft_grid),  // H(k,t) → evolved_a, C(k) → slope_spectrum
-            (ComputePasses::FftIfftRows,      wg_fft_rows),  // evolved_a → evolved_b (height row IFFT)
-            (ComputePasses::FftIfftCols,      wg_fft_cols),  // evolved_b → height_field
-            (ComputePasses::FftIfftRowsSlope, wg_fft_rows),  // slope_spectrum → evolved_a (safe reuse)
-            (ComputePasses::FftIfftColsSlope, wg_fft_cols),  // evolved_a → slope_field (sampled per-fragment)
-        ];
-
         // Resolve all pipelines + bind groups; bail if any aren't ready.
-        let mut resolved = Vec::with_capacity(passes_to_run.len() + fft_passes_to_run.len());
+        let mut resolved = Vec::with_capacity(passes_to_run.len() + FFT_CASCADE_COUNT * 5);
         for (pass, wg) in &passes_to_run {
             let Some((_, pipeline_id)) = pipelines.passes.get(pass) else { return Ok(()) };
             let Some(pipeline) = pipeline_cache.get_compute_pipeline(*pipeline_id) else { return Ok(()) };
@@ -106,12 +106,32 @@ impl render_graph::Node for WaterSimulationNode {
             resolved.push((pass.as_ref(), pipeline, bg, *wg));
         }
 
-        // FFT passes are optional (bind groups may not be ready yet)
-        for (pass, wg) in &fft_passes_to_run {
-            let Some((_, pipeline_id)) = pipelines.passes.get(pass) else { continue };
-            let Some(pipeline) = pipeline_cache.get_compute_pipeline(*pipeline_id) else { continue };
-            let Some(bg) = bgs.bind_groups.get(pass) else { continue };
-            resolved.push((pass.as_ref(), pipeline, bg, *wg));
+        // FFT passes run once per cascade (bind groups are per-cascade)
+        let fft_pass_order = [
+            (ComputePasses::FftTimeEvolve,    wg_fft_grid),
+            (ComputePasses::FftIfftRows,      wg_fft_rows),
+            (ComputePasses::FftIfftCols,      wg_fft_cols),
+            (ComputePasses::FftIfftRowsSlope, wg_fft_rows),
+            (ComputePasses::FftIfftColsSlope, wg_fft_cols),
+        ];
+        // Resolve pipelines once (shared across all cascades)
+        let fft_pipelines: Vec<Option<&_>> = fft_pass_order.iter().map(|(pass, _)| {
+            let (_, pipeline_id) = pipelines.passes.get(pass)?;
+            pipeline_cache.get_compute_pipeline(*pipeline_id)
+        }).collect();
+
+        for cascade_bgs in &bgs.fft_cascade_bgs {
+            let cascade_bind_groups = [
+                &cascade_bgs.time_evolve,
+                &cascade_bgs.ifft_rows,
+                &cascade_bgs.ifft_cols,
+                &cascade_bgs.ifft_rows_slope,
+                &cascade_bgs.ifft_cols_slope,
+            ];
+            for (idx, (_, wg)) in fft_pass_order.iter().enumerate() {
+                let Some(pipeline) = fft_pipelines[idx] else { continue };
+                resolved.push(("fft", pipeline, cascade_bind_groups[idx], *wg));
+            }
         }
 
         let encoder = ctx.command_encoder();
@@ -263,10 +283,19 @@ impl FromWorld for WaterPipelines {
 
 // ─── Bind Groups (rebuilt each frame because ping-pong flips) ─────────────────
 
+pub struct FftCascadeBindGroups {
+    pub time_evolve: BindGroup,
+    pub ifft_rows: BindGroup,
+    pub ifft_cols: BindGroup,
+    pub ifft_rows_slope: BindGroup,
+    pub ifft_cols_slope: BindGroup,
+}
+
 #[derive(Resource)]
 pub struct WaterBindGroups {
     pub bind_groups: HashMap<ComputePasses, BindGroup>,
     pub buffers: HashMap<Buffers, Buffer>,
+    pub fft_cascade_bgs: Vec<FftCascadeBindGroups>,
 }
 
 pub fn queue_bind_groups(
@@ -282,7 +311,7 @@ pub fn queue_bind_groups(
     existing_bgs:  Option<ResMut<WaterBindGroups>>,
     sim_handle:     Option<ResMut<WaterSimulationHandles>>,
     fft_handles:   Option<Res<FftOceanHandles>>,
-    fft_settings:  Option<Res<FftOceanSettings>>,
+    fft_settings_array: Option<Res<FftOceanSettingsArray>>,
     render_images: Res<RenderAssets<GpuImage>>,
     queue:         Res<bevy::render::renderer::RenderQueue>,
     pipeline_cache: Res<PipelineCache>,
@@ -317,8 +346,10 @@ pub fn queue_bind_groups(
         queue.write_buffer(&bgs.buffers[&Buffers::Settings], 0, &encode_uniform!(&*settings));
         queue.write_buffer(&bgs.buffers[&Buffers::DebugSettings], 0, &encode_uniform!(&*debug_settings));
         queue.write_buffer(&bgs.buffers[&Buffers::VoxelSettings], 0, &encode_uniform!(&*voxel_settings));
-        if let Some(ref fft_s) = fft_settings {
-            queue.write_buffer(&bgs.buffers[&Buffers::FftOceanSettings], 0, &encode_uniform!(&**fft_s));
+        if let Some(ref fft_sa) = fft_settings_array {
+            for i in 0..FFT_CASCADE_COUNT {
+                queue.write_buffer(&bgs.buffers[&FFT_SETTINGS_BUFFERS[i]], 0, &encode_uniform!(&fft_sa.cascades[i]));
+            }
         }
 
         bgs.buffers.clone()
@@ -341,8 +372,13 @@ pub fn queue_bind_groups(
         dyn_buf.write(&*water_wave_group_speeds).expect("ShaderType write failed");
         bufs.insert(Buffers::WaterWaveGroupSpeeds, mk("water_wave_group_speeds_buf", dyn_buf.into_inner()));
 
-        if let Some(ref fft_s) = fft_settings {
-            bufs.insert(Buffers::FftOceanSettings, mk("fft_ocean_settings_buf", encode_uniform!(&**fft_s)));
+        if let Some(ref fft_sa) = fft_settings_array {
+            for i in 0..FFT_CASCADE_COUNT {
+                bufs.insert(FFT_SETTINGS_BUFFERS[i], mk(
+                    Box::leak(format!("fft_ocean_settings_buf_{i}").into_boxed_str()),
+                    encode_uniform!(&fft_sa.cascades[i])
+                ));
+            }
         }
 
         bufs
@@ -412,79 +448,81 @@ pub fn queue_bind_groups(
         )),
     ));
 
-    // ── FFT Ocean Bind Groups ────────────────────────────────────────────────
-    if let (Some(fft_h), Some(_fft_s)) = (&fft_handles, &fft_settings) {
-        let fft_ok = render_images.get(&fft_h.initial_spectrum).is_some()
-            && render_images.get(&fft_h.initial_spectrum_conj).is_some()
-            && render_images.get(&fft_h.angular_frequency).is_some()
-            && render_images.get(&fft_h.evolved_spectrum_a).is_some()
-            && render_images.get(&fft_h.evolved_spectrum_b).is_some()
-            && render_images.get(&fft_h.height_field).is_some()
-            && render_images.get(&fft_h.slope_spectrum).is_some()
-            && render_images.get(&fft_h.slope_field).is_some()
-            && buffers.contains_key(&Buffers::FftOceanSettings);
+    // ── FFT Ocean Bind Groups (per cascade) ─────────────────────────────────
+    let mut fft_cascade_bgs: Vec<FftCascadeBindGroups> = Vec::new();
 
-        if fft_ok {
-            let init_spec = &render_images.get(&fft_h.initial_spectrum).unwrap().texture_view;
-            let init_conj = &render_images.get(&fft_h.initial_spectrum_conj).unwrap().texture_view;
-            let ang_freq = &render_images.get(&fft_h.angular_frequency).unwrap().texture_view;
-            let evolved_a = &render_images.get(&fft_h.evolved_spectrum_a).unwrap().texture_view;
-            let evolved_b = &render_images.get(&fft_h.evolved_spectrum_b).unwrap().texture_view;
-            let height_fld = &render_images.get(&fft_h.height_field).unwrap().texture_view;
-            let slope_spec = &render_images.get(&fft_h.slope_spectrum).unwrap().texture_view;
-            let slope_fld = &render_images.get(&fft_h.slope_field).unwrap().texture_view;
-            let fft_settings_buf = &buffers[&Buffers::FftOceanSettings];
+    if let (Some(fft_h), Some(_fft_sa)) = (&fft_handles, &fft_settings_array) {
+        for i in 0..FFT_CASCADE_COUNT {
+            let c = &fft_h.cascades[i];
+            let cascade_ready =
+                render_images.get(&c.initial_spectrum).is_some()
+                && render_images.get(&c.initial_spectrum_conj).is_some()
+                && render_images.get(&c.angular_frequency).is_some()
+                && render_images.get(&c.evolved_spectrum_a).is_some()
+                && render_images.get(&c.evolved_spectrum_b).is_some()
+                && render_images.get(&c.height_field).is_some()
+                && render_images.get(&c.slope_spectrum).is_some()
+                && render_images.get(&c.slope_field).is_some()
+                && buffers.contains_key(&FFT_SETTINGS_BUFFERS[i]);
 
-            bind_groups.insert(ComputePasses::FftTimeEvolve, device.create_bind_group(
+            if !cascade_ready { break; }
+
+            let init_spec  = &render_images.get(&c.initial_spectrum).unwrap().texture_view;
+            let init_conj  = &render_images.get(&c.initial_spectrum_conj).unwrap().texture_view;
+            let ang_freq   = &render_images.get(&c.angular_frequency).unwrap().texture_view;
+            let evolved_a  = &render_images.get(&c.evolved_spectrum_a).unwrap().texture_view;
+            let evolved_b  = &render_images.get(&c.evolved_spectrum_b).unwrap().texture_view;
+            let height_fld = &render_images.get(&c.height_field).unwrap().texture_view;
+            let slope_spec = &render_images.get(&c.slope_spectrum).unwrap().texture_view;
+            let slope_fld  = &render_images.get(&c.slope_field).unwrap().texture_view;
+            let fft_settings_buf = &buffers[&FFT_SETTINGS_BUFFERS[i]];
+
+            let time_evolve = device.create_bind_group(
                 "fft_time_evolve_bg",
                 &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftTimeEvolve)),
                 &BindGroupEntries::sequential((
                     init_spec,
                     init_conj,
                     ang_freq,
-                    evolved_a,  // write evolved spectrum to A
+                    evolved_a,
                     fft_settings_buf.as_entire_binding(),
-                    slope_spec, // write slope spectrum
+                    slope_spec,
                 )),
-            ));
+            );
 
-            bind_groups.insert(ComputePasses::FftIfftRows, device.create_bind_group(
+            let ifft_rows = device.create_bind_group(
                 "fft_ifft_rows_bg",
                 &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftIfftRows)),
-                &BindGroupEntries::sequential((
-                    evolved_a,  // read from A (output of time evolve)
-                    evolved_b,  // write row IFFT result to B
-                )),
-            ));
+                &BindGroupEntries::sequential((evolved_a, evolved_b)),
+            );
 
-            bind_groups.insert(ComputePasses::FftIfftCols, device.create_bind_group(
+            let ifft_cols = device.create_bind_group(
                 "fft_ifft_cols_bg",
                 &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftIfftCols)),
-                &BindGroupEntries::sequential((
-                    evolved_b,  // read from B (output of row IFFT)
-                    height_fld, // write height field
-                )),
-            ));
+                &BindGroupEntries::sequential((evolved_b, height_fld)),
+            );
 
-            bind_groups.insert(ComputePasses::FftIfftRowsSlope, device.create_bind_group(
+            let ifft_rows_slope = device.create_bind_group(
                 "fft_ifft_rows_slope_bg",
                 &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftIfftRowsSlope)),
-                &BindGroupEntries::sequential((
-                    slope_spec,  // read slope spectrum
-                    evolved_a,   // write row-IFFT result back into evolved_a (safe: consumed by FftIfftRows)
-                )),
-            ));
+                &BindGroupEntries::sequential((slope_spec, evolved_a)),
+            );
 
-            bind_groups.insert(ComputePasses::FftIfftColsSlope, device.create_bind_group(
+            let ifft_cols_slope = device.create_bind_group(
                 "fft_ifft_cols_slope_bg",
                 &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::FftIfftColsSlope)),
-                &BindGroupEntries::sequential((
-                    evolved_a,   // read row-IFFT'd slope spectrum
-                    slope_fld,   // write (slope_x, slope_z) spatial field
-                )),
-            ));
+                &BindGroupEntries::sequential((evolved_a, slope_fld)),
+            );
+
+            fft_cascade_bgs.push(FftCascadeBindGroups {
+                time_evolve,
+                ifft_rows,
+                ifft_cols,
+                ifft_rows_slope,
+                ifft_cols_slope,
+            });
         }
     }
 
-    commands.insert_resource(WaterBindGroups { bind_groups, buffers });
+    commands.insert_resource(WaterBindGroups { bind_groups, buffers, fft_cascade_bgs });
 }

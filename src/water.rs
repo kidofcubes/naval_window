@@ -92,9 +92,17 @@ fn setup(
         amplitude_texture: water_sim_handles.amplitude_texture_a.clone(),
         profile_buffer: water_sim_handles.profile_buffer.clone(),
         display_mode: 1, // default to FFT ocean
-        fft_height_texture: fft_handles.height_field.clone(),
-        fft_slope_texture: fft_handles.slope_field.clone(),
-        fft_patch_length: fft_config.patch_length,
+        fft_height_0: fft_handles.cascades[0].height_field.clone(),
+        fft_slope_0:  fft_handles.cascades[0].slope_field.clone(),
+        fft_height_1: fft_handles.cascades[1].height_field.clone(),
+        fft_slope_1:  fft_handles.cascades[1].slope_field.clone(),
+        fft_height_2: fft_handles.cascades[2].height_field.clone(),
+        fft_slope_2:  fft_handles.cascades[2].slope_field.clone(),
+        fft_patch_lengths: Vec3::new(
+            fft_config.patch_lengths[0],
+            fft_config.patch_lengths[1],
+            fft_config.patch_lengths[2],
+        ),
     };
 
     let material = ExtendedMaterial {
@@ -194,15 +202,27 @@ pub struct CustomMaterial {
     #[uniform(112)]
     display_mode: u32, // 0 = wavelets, 1 = FFT ocean
 
+    // Cascade 0
     #[texture(113, dimension = "2d", sample_type = "float")]
-    fft_height_texture: Handle<Image>,
-
+    fft_height_0: Handle<Image>,
     #[texture(114, dimension = "2d", sample_type = "float")]
     #[sampler(115)]
-    fft_slope_texture: Handle<Image>,
+    fft_slope_0: Handle<Image>,
 
-    #[uniform(116)]
-    fft_patch_length: f32,
+    // Cascade 1
+    #[texture(116, dimension = "2d", sample_type = "float")]
+    fft_height_1: Handle<Image>,
+    #[texture(117, dimension = "2d", sample_type = "float")]
+    fft_slope_1: Handle<Image>,
+
+    // Cascade 2
+    #[texture(118, dimension = "2d", sample_type = "float")]
+    fft_height_2: Handle<Image>,
+    #[texture(119, dimension = "2d", sample_type = "float")]
+    fft_slope_2: Handle<Image>,
+
+    #[uniform(120)]
+    fft_patch_lengths: Vec3,
 }
 
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.

@@ -35,7 +35,7 @@ pub const WATER_SIZE: f32 = 16384.0;
 
 /// Maximum quadtree depth. At level N, patch world size = WATER_SIZE / 2^N.
 /// With WATER_SIZE = 4096 and MAX_LEVELS = 7, finest patches are 32 m wide.
-const MAX_LEVELS: u32 = 13;
+const MAX_LEVELS: u32 = 15;
 
 /// Subdivide a node when the camera is closer than node.size × SPLIT_FACTOR.
 /// Increase to subdivide more aggressively (more triangles near camera).
