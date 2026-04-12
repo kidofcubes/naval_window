@@ -3,11 +3,10 @@ use bevy::light::NotShadowCaster;
 use bevy::math::Vec2;
 use bevy::prelude::*;
 use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::render::render_resource::Face;
 use num_complex::Complex32;
 use phastft::planner::Direction;
 use rand::Rng;
-
-const GRID_SIZE: usize = 256;
 
 pub struct BigWatering;
 impl Plugin for BigWatering {
@@ -31,11 +30,11 @@ struct OceanConfig {
 impl Default for OceanConfig {
     fn default() -> Self {
         Self {
-            grid_size: GRID_SIZE,
-            patch_length: 256.0,
+            grid_size: 128,
+            patch_length: 32.0,
             wind_speed: 10.0,
             wind_dir: Vec2::new(1.0, 0.0).normalize(),
-            amplitude: 0.01,
+            amplitude: 0.5,
             gravity: 9.81,
             fetch: 100_000.0,
             gamma: 3.3,
@@ -58,7 +57,11 @@ struct OceanSimulation {
     initial_spectrum_conjugate: Vec<Vec<Complex32>>,
     angular_frequency: Vec<Vec<f32>>,
     evolved_spectrum: Vec<Vec<Complex32>>,
+    spectrum_x: Vec<Vec<Complex32>>,
+    spectrum_z: Vec<Vec<Complex32>>,
     heights: Vec<Vec<f32>>,
+    displacements_x: Vec<Vec<f32>>,
+    displacements_z: Vec<Vec<f32>>,
     normals: Vec<Vec<Vec3>>,
     fft_scratch: Vec<Complex32>,
 }
@@ -297,12 +300,15 @@ fn init_ocean(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
     commands.spawn((
         Mesh3d(meshes.add(ocean_mesh)),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.0, 0.3, 0.6),
+            // base_color: Color::srgb(0.0, 0.3, 0.6),
+            base_color: Color::srgb(0.5, 0.5, 0.5),
             alpha_mode: AlphaMode::Opaque,
-            double_sided: true,
-            cull_mode: None,
-            perceptual_roughness: 0.3,
-            metallic: 0.1,
+            double_sided: false,
+            cull_mode: Some(Face::Back),
+            // cull_mode: Some(Face::Front),
+            perceptual_roughness: 1.0,
+            reflectance: 0.0,
+            metallic: 0.0,
             ..default()
         })),
         NotShadowCaster,
@@ -315,7 +321,11 @@ fn init_ocean(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
         initial_spectrum_conjugate,
         angular_frequency,
         evolved_spectrum: vec![vec![zero; grid_size]; grid_size],
+        spectrum_x: vec![vec![zero; grid_size]; grid_size],
+        spectrum_z: vec![vec![zero; grid_size]; grid_size],
         heights: vec![vec![0.0; grid_size]; grid_size],
+        displacements_x: vec![vec![0.0; grid_size]; grid_size],
+        displacements_z: vec![vec![0.0; grid_size]; grid_size],
         normals: vec![vec![Vec3::Y; grid_size]; grid_size],
         fft_scratch: vec![zero; grid_size],
     });
@@ -335,11 +345,41 @@ fn update_ocean(
     // Step 1: Time-evolve spectrum
     for row in 0..grid_size {
         for col in 0..grid_size {
-            let base = sim.initial_spectrum[row][col];
+            let base      = sim.initial_spectrum[row][col];
             let conjugate = sim.initial_spectrum_conjugate[row][col];
-            let phase = sim.angular_frequency[row][col] * elapsed;
+            let phase     = sim.angular_frequency[row][col] * elapsed;
             let exp_phase = Complex32::from_polar(1.0, phase);
-            sim.evolved_spectrum[row][col] = base * exp_phase + conjugate * exp_phase.conj();
+
+            // Same as before — the vertical height spectrum H(k,t)
+            let h = base * exp_phase + conjugate * exp_phase.conj();
+            sim.evolved_spectrum[row][col] = h;
+
+            // k̂ = (kx, kz) / |k|, the unit wave direction for this cell
+            // wave_vector_x/z store kx and kz (not yet normalized)
+            // let kx = sim.wave_vector_x[row][col];
+            // let kz = sim.wave_vector_z[row][col];
+            let kx = 2.0 * std::f32::consts::PI * (col as f32 - grid_size as f32 / 2.0) / patch_length;
+            let kz = 2.0 * std::f32::consts::PI * (row as f32 - grid_size as f32 / 2.0) / patch_length;
+            let k_len = (kx * kx + kz * kz).sqrt();
+
+            // Guard the DC term (k=0) — dividing by zero there is meaningless
+            // and that component contributes no displacement anyway
+            if k_len > 1e-6 {
+                let k_hat_x = kx / k_len;
+                let k_hat_z = kz / k_len;
+
+                // Multiplying by -i rotates the complex number 90° clockwise:
+                // -i * (a + bi)  =  b - ai
+                // This is the quarter-wave phase shift that turns a vertical
+                // oscillation into a correct horizontal one
+                let pos_i_h = Complex32::new(-h.im, h.re);
+
+                sim.spectrum_x[row][col] = pos_i_h * k_hat_x;
+                sim.spectrum_z[row][col] = pos_i_h * k_hat_z;
+            } else {
+                sim.spectrum_x[row][col] = Complex32::ZERO;
+                sim.spectrum_z[row][col] = Complex32::ZERO;
+            }
         }
     }
 
@@ -347,9 +387,13 @@ fn update_ocean(
     {
         let sim = &mut *sim;
         ifft_2d(&mut sim.evolved_spectrum, &mut sim.fft_scratch);
+        ifft_2d(&mut sim.spectrum_x,       &mut sim.fft_scratch);
+        ifft_2d(&mut sim.spectrum_z,       &mut sim.fft_scratch);
         for row in 0..grid_size {
             for col in 0..grid_size {
                 sim.heights[row][col] = sim.evolved_spectrum[row][col].re;
+                sim.displacements_x[row][col] = sim.spectrum_x[row][col].re * 1.0;
+                sim.displacements_z[row][col] = sim.spectrum_z[row][col].re * 1.0;
             }
         }
     }
@@ -374,7 +418,11 @@ fn update_ocean(
                     for mesh_row in 0..vertices_per_side {
                         for mesh_col in 0..vertices_per_side {
                             let height = sample_bilinear(&sim.heights, mesh_col as f32 * MESH_STEP, mesh_row as f32 * MESH_STEP);
+                            let x_displacement = sample_bilinear(&sim.displacements_x, mesh_col as f32 * MESH_STEP, mesh_row as f32 * MESH_STEP);
+                            let z_displacement = sample_bilinear(&sim.displacements_z, mesh_col as f32 * MESH_STEP, mesh_row as f32 * MESH_STEP);
+                            pos[mesh_row * vertices_per_side + mesh_col][0] = (mesh_col as f32 * MESH_STEP * (patch_length / grid_size as f32)) + x_displacement;
                             pos[mesh_row * vertices_per_side + mesh_col][1] = height;
+                            pos[mesh_row * vertices_per_side + mesh_col][2] = (mesh_row as f32 * MESH_STEP * (patch_length / grid_size as f32)) + z_displacement;
                         }
                     }
                 }
