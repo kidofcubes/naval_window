@@ -23,7 +23,12 @@ pub enum ComputePasses {
 
 impl ComputePasses {
     pub fn wgsl_path(&self) -> String {
-        format!("{}.wgsl", self.as_ref())
+        match self {
+            ComputePasses::WaterInject | ComputePasses::WaterAdvection | ComputePasses::WaterDiffusion | ComputePasses::WaterProfile => {
+                format!("realwaves/{}.wgsl", self.as_ref())
+            }
+            _ => todo!(),
+        }
     }
 }
 

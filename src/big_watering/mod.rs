@@ -59,6 +59,8 @@ struct OceanSimulation {
     evolved_spectrum: Vec<Vec<Complex32>>,
     spectrum_x: Vec<Vec<Complex32>>,
     spectrum_z: Vec<Vec<Complex32>>,
+    slope_spectrum_x: Vec<Vec<Complex32>>,
+    slope_spectrum_z: Vec<Vec<Complex32>>,
     heights: Vec<Vec<f32>>,
     displacements_x: Vec<Vec<f32>>,
     displacements_z: Vec<Vec<f32>>,
@@ -165,6 +167,27 @@ fn compute_normals(heights: &Vec<Vec<f32>>, normals: &mut Vec<Vec<Vec3>>, patch_
             let dh_dx = (right - left) / (2.0 * cell_size);
             let dh_dz = (up - down) / (2.0 * cell_size);
 
+            normals[row][col] = Vec3::new(-dh_dx, 1.0, -dh_dz).normalize();
+        }
+    }
+}
+
+/// Build normals from the slope spectra `i*kx*H(k)` and `i*kz*H(k)`.
+/// Caller must have already filled `slope_spectrum_x` / `slope_spectrum_z`
+/// with those k-space products before the height IFFT clobbered the spectrum.
+fn compute_normals_from_spectrum(
+    slope_spectrum_x: &mut Vec<Vec<Complex32>>,
+    slope_spectrum_z: &mut Vec<Vec<Complex32>>,
+    normals: &mut Vec<Vec<Vec3>>,
+    fft_scratch: &mut Vec<Complex32>,
+) {
+    let grid_size = slope_spectrum_x.len();
+    ifft_2d(slope_spectrum_x, fft_scratch);
+    ifft_2d(slope_spectrum_z, fft_scratch);
+    for row in 0..grid_size {
+        for col in 0..grid_size {
+            let dh_dx = slope_spectrum_x[row][col].re;
+            let dh_dz = slope_spectrum_z[row][col].re;
             normals[row][col] = Vec3::new(-dh_dx, 1.0, -dh_dz).normalize();
         }
     }
@@ -323,6 +346,8 @@ fn init_ocean(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
         evolved_spectrum: vec![vec![zero; grid_size]; grid_size],
         spectrum_x: vec![vec![zero; grid_size]; grid_size],
         spectrum_z: vec![vec![zero; grid_size]; grid_size],
+        slope_spectrum_x: vec![vec![zero; grid_size]; grid_size],
+        slope_spectrum_z: vec![vec![zero; grid_size]; grid_size],
         heights: vec![vec![0.0; grid_size]; grid_size],
         displacements_x: vec![vec![0.0; grid_size]; grid_size],
         displacements_z: vec![vec![0.0; grid_size]; grid_size],
@@ -376,9 +401,17 @@ fn update_ocean(
 
                 sim.spectrum_x[row][col] = pos_i_h * k_hat_x;
                 sim.spectrum_z[row][col] = pos_i_h * k_hat_z;
+
+                // Slope spectra: ∂h/∂x ↔ i*kx*H, ∂h/∂z ↔ i*kz*H.
+                // i*(a+bi) = -b + ai, so i*H = Complex32::new(-h.im, h.re).
+                let i_h = Complex32::new(-h.im, h.re);
+                sim.slope_spectrum_x[row][col] = i_h * kx;
+                sim.slope_spectrum_z[row][col] = i_h * kz;
             } else {
                 sim.spectrum_x[row][col] = Complex32::ZERO;
                 sim.spectrum_z[row][col] = Complex32::ZERO;
+                sim.slope_spectrum_x[row][col] = Complex32::ZERO;
+                sim.slope_spectrum_z[row][col] = Complex32::ZERO;
             }
         }
     }
@@ -408,6 +441,8 @@ fn update_ocean(
     // Step 3: Compute normals
     let sim = &mut *sim;
     compute_normals(&sim.heights, &mut sim.normals, patch_length);
+    // compute_normals_from_spectrum(&mut sim.slope_spectrum_x, &mut sim.slope_spectrum_z, &mut sim.normals, &mut sim.fft_scratch);
+
 
     // Step 4: Update mesh vertices (bilinear interpolation for fractional MESH_STEP)
     if let Ok(mesh_handle) = ocean_query.single() {
