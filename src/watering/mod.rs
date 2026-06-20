@@ -1,25 +1,19 @@
 mod compute_shader;
-mod pre_compute;
 mod cpu_debug_impl;
 pub(crate) mod water_lod;
+pub(crate) mod shader_utils;
 
-use std::f32::consts::TAU;
-use std::time::Instant;
+use std::collections::HashMap;
 use bevy::app::{App, Plugin, Startup, Update};
 use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
 use bevy::prelude::*;
-use bevy::prelude::ops::atan2;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
-use bevy::render::renderer::RenderDevice;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-use bevy::render::render_resource::{Extent3d, ShaderType, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages};
+use bevy::render::render_resource::{Extent3d, ShaderType, TextureFormat};
 use crate::BuildData;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::render::render_graph::RenderGraphExt;
 use crate::watering::cpu_debug_impl::CpuDebugWatering;
-use crate::watering::pre_compute::compute_group_speeds;
-use crate::watering::water_lod::WaterLodPlugin;
+use crate::watering::shader_utils::{compute_group_speeds, make_storage_image};
 
 pub struct Watering;
 impl Plugin for Watering{
@@ -46,10 +40,8 @@ impl Plugin for Watering{
                 voxel_size: 0.0,
                 grid_dims: Default::default(),
             })
-            .insert_resource(VoxelGridHandle {
-                voxel: None,
-                sdf: None,
-            })
+            .insert_resource(WaterTextures::default())
+            .insert_resource(WaterPingPong::default())
             .insert_resource(WaterWaveGroupSpeeds {
                 wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_ZETA_NUMBERS).iter().map(|x| vec4(*x * GRID_SCALE, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap()
             })
@@ -64,12 +56,11 @@ impl Plugin for Watering{
         if(true) {
             app
                 .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
-                .add_plugins(ExtractResourcePlugin::<HeightFieldHandle>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterDebugSettings>::default())
                 .add_plugins(ExtractResourcePlugin::<VoxelSettings>::default())
-                .add_plugins(ExtractResourcePlugin::<VoxelGridHandle>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterWaveGroupSpeeds>::default())
-                .add_plugins(ExtractResourcePlugin::<WaterSimulationHandles>::default())
+                .add_plugins(ExtractResourcePlugin::<WaterTextures>::default())
+                .add_plugins(ExtractResourcePlugin::<WaterPingPong>::default())
             ;
             let render_app = app.sub_app_mut(RenderApp);
             render_app
@@ -112,118 +103,47 @@ impl Plugin for Watering{
 
 pub fn setup_textures(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
-    // mut water_material: ResMut<Assets<water_stuff::ocean_mesh::WaterMaterial>>,
-    // mut hf_handle: ResMut<HeightFieldHandle>,
-    // mut commands: Commands,
 ){
-    let offsets_image = Image {
-        texture_descriptor: TextureDescriptor {
-            label:               Some("height_field_mat"),
-            size:                Extent3d { width: RENDER_X_SIZE as u32, height: RENDER_Z_SIZE as u32, depth_or_array_layers: 1 },
-            mip_level_count:     1,
-            sample_count:        1,
-            dimension:           TextureDimension::D2,
-            format:              TextureFormat::Rgba32Float,
-            usage:               TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST
-                | TextureUsages::STORAGE_BINDING,
-            view_formats:        &[],
-        },
-        data: Some(vec![0u8; (RENDER_X_SIZE * RENDER_Z_SIZE * 16) as usize]),
-        ..default()
+    let render_size = Extent3d {
+        width: RENDER_X_SIZE as u32,
+        height: RENDER_Z_SIZE as u32,
+        depth_or_array_layers: 1,
+    };
+    let amplitude_size = Extent3d {
+        width: GRID_X_SIZE as u32,
+        height: GRID_Z_SIZE as u32,
+        depth_or_array_layers: (DIRECTIONS * TOTAL_ZETA_NUMBERS) as u32,
+    };
+    let profile_size = Extent3d {
+        width: PROFILE_BUFFER_LENGTH as u32,
+        height: TOTAL_ZETA_NUMBERS as u32,
+        depth_or_array_layers: 1,
     };
 
-    // Normal field texture (rgba32float for xyz normal + unused alpha)
-    let normal_image = Image {
-        texture_descriptor: TextureDescriptor {
-            label:               Some("normal_field_mat"),
-            size:                Extent3d { width: RENDER_X_SIZE as u32, height: RENDER_Z_SIZE as u32, depth_or_array_layers: 1 },
-            mip_level_count:     1,
-            sample_count:        1,
-            dimension:           TextureDimension::D2,
-            format:              TextureFormat::Rgba32Float,
-            usage:               TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST
-                | TextureUsages::STORAGE_BINDING,
-            view_formats:        &[],
-        },
-        data: Some(vec![0u8; (RENDER_X_SIZE * RENDER_Z_SIZE * 16) as usize]), // 16 bytes per pixel (4 x f32)
-        ..default()
-    };
+    let mut textures = WaterTextures::default();
+    textures.insert(
+        WaterTexture::HeightOffsets,
+        images.add(make_storage_image("height_field_mat", render_size, TextureFormat::Rgba32Float)),
+    );
+    textures.insert(
+        WaterTexture::HeightNormals,
+        images.add(make_storage_image("normal_field_mat", render_size, TextureFormat::Rgba32Float)),
+    );
+    textures.insert(
+        WaterTexture::AmplitudeA,
+        images.add(make_storage_image("amplitude_texture_a", amplitude_size, TextureFormat::R32Float)),
+    );
+    textures.insert(
+        WaterTexture::AmplitudeB,
+        images.add(make_storage_image("amplitude_texture_b", amplitude_size, TextureFormat::R32Float)),
+    );
+    textures.insert(
+        WaterTexture::Profile,
+        images.add(make_storage_image("profile_buffer", profile_size, TextureFormat::Rgba32Float)),
+    );
 
-    // Create placeholder amplitude texture
-    let amplitude_image_a = Image {
-        texture_descriptor: TextureDescriptor {
-            label:               Some("amplitude_texture"),
-            size:                Extent3d { 
-                width: GRID_X_SIZE as u32, 
-                height: GRID_Z_SIZE as u32, 
-                depth_or_array_layers: (DIRECTIONS * TOTAL_ZETA_NUMBERS) as u32 
-            },
-            mip_level_count:     1,
-            sample_count:        1,
-            dimension:           TextureDimension::D2,
-            format:              TextureFormat::R32Float,
-            usage:               TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST
-                | TextureUsages::STORAGE_BINDING,
-            view_formats:        &[],
-        },
-        data: Some(vec![0u8; (GRID_X_SIZE * GRID_Z_SIZE * DIRECTIONS * TOTAL_ZETA_NUMBERS * 4) as usize]),
-        ..default()
-    };
-    let amplitude_image_b = Image {
-        texture_descriptor: TextureDescriptor {
-            label:               Some("amplitude_texture"),
-            size:                Extent3d {
-                width: GRID_X_SIZE as u32,
-                height: GRID_Z_SIZE as u32,
-                depth_or_array_layers: (DIRECTIONS * TOTAL_ZETA_NUMBERS) as u32
-            },
-            mip_level_count:     1,
-            sample_count:        1,
-            dimension:           TextureDimension::D2,
-            format:              TextureFormat::R32Float,
-            usage:               TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST
-                | TextureUsages::STORAGE_BINDING,
-            view_formats:        &[],
-        },
-        data: Some(vec![0u8; (GRID_X_SIZE * GRID_Z_SIZE * DIRECTIONS * TOTAL_ZETA_NUMBERS * 4) as usize]),
-        ..default()
-    };
-
-    // Create placeholder profile buffer
-    let profile_image = Image {
-        texture_descriptor: TextureDescriptor {
-            label:               Some("profile_buffer"),
-            size:                Extent3d { width: PROFILE_BUFFER_LENGTH as u32, height: TOTAL_ZETA_NUMBERS as u32, depth_or_array_layers: 1 },
-            mip_level_count:     1,
-            sample_count:        1,
-            dimension:           TextureDimension::D2,
-            format:              TextureFormat::Rgba32Float,
-            usage:               TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST
-                | TextureUsages::STORAGE_BINDING,
-            view_formats:        &[],
-        },
-        data: Some(vec![0u8; (PROFILE_BUFFER_LENGTH * TOTAL_ZETA_NUMBERS * 16) as usize]),
-        ..default()
-    };
-
-    commands.insert_resource(HeightFieldHandle{ 
-        offsets_handle: images.add(offsets_image), 
-        normals_handle: images.add(normal_image)
-    });
-    
-    commands.insert_resource(WaterSimulationHandles {
-        amplitude_texture_a: images.add(amplitude_image_a),
-        amplitude_texture_b: images.add(amplitude_image_b),
-        profile_buffer: images.add(profile_image),
-        flipped: false
-    });
+    commands.insert_resource(textures);
 }
 
 // ─── Update Systems ──────────────────────────────────────────────────────────
@@ -320,11 +240,48 @@ pub struct WaterSettings {
     pub elapsed_time: f32,
 }
 
-//to be put in main world
-#[derive(Resource, ExtractResource, Clone)]
-pub struct HeightFieldHandle {
-    pub offsets_handle: Handle<Image>,
-    pub normals_handle: Handle<Image>
+/// Keys for every `Handle<Image>` the watering pipeline owns.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum WaterTexture {
+    HeightOffsets,
+    HeightNormals,
+    AmplitudeA,
+    AmplitudeB,
+    Profile,
+    Voxel,
+    Sdf,
+}
+
+/// Single resource for every texture handle used by the watering pipeline.
+#[derive(Resource, ExtractResource, Clone, Default)]
+pub struct WaterTextures {
+    pub map: HashMap<WaterTexture, Handle<Image>>,
+}
+
+impl WaterTextures {
+    pub fn get(&self, key: WaterTexture) -> Option<&Handle<Image>> {
+        self.map.get(&key)
+    }
+    pub fn insert(&mut self, key: WaterTexture, handle: Handle<Image>) {
+        self.map.insert(key, handle);
+    }
+}
+
+/// Ping-pong state for the two amplitude textures. Flipped each frame.
+#[derive(Resource, ExtractResource, Clone, Default)]
+pub struct WaterPingPong {
+    pub flipped: bool,
+}
+
+impl WaterPingPong {
+    /// Returns (read_key, write_key) for the amplitude ping-pong this frame.
+    pub fn amplitude_keys(&self) -> (WaterTexture, WaterTexture) {
+        if self.flipped {
+            (WaterTexture::AmplitudeB, WaterTexture::AmplitudeA)
+        } else {
+            (WaterTexture::AmplitudeA, WaterTexture::AmplitudeB)
+        }
+    }
 }
 
 /// Debug settings for amplitude injection (extracted to render world)
@@ -367,33 +324,12 @@ impl Default for VoxelSettings {
     }
 }
 
-/// Handle to the voxel grid 3D texture and SDF texture
-#[derive(Resource, ExtractResource, Clone)]
-pub struct VoxelGridHandle {
-    pub voxel: Option<Handle<Image>>,
-    pub sdf: Option<Handle<Image>>,
-}
-
-/// Handles to water simulation textures for use in materials
-#[derive(Resource, ExtractResource, Clone)]
-pub struct WaterSimulationHandles {
-    pub amplitude_texture_a: Handle<Image>,
-    pub amplitude_texture_b: Handle<Image>,
-    pub profile_buffer: Handle<Image>,
-    pub flipped: bool,
-}
-
-fn setup_voxel_fallback(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    // let handle = crate::voxelize::null_texture(&mut images, TextureDimension::D3, TextureFormat::R8Uint);
-    // commands.insert_resource(VoxelGridHandle(handle));
-}
-
 //NOTES ABOUT COORDINATE INDEXES
 //NO NOTES
 fn sync_voxel_grid(
     build_data: Res<BuildData>,
     mut voxel_settings: ResMut<VoxelSettings>,
-    mut voxel_handle: ResMut<VoxelGridHandle>,
+    mut textures: ResMut<WaterTextures>,
     mut images: ResMut<Assets<Image>>,
 ) {
     if let Some(ref grid) = build_data.voxel_grid {
@@ -413,9 +349,9 @@ fn sync_voxel_grid(
         voxel_settings.water_to_voxel = Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size)).mul_mat4(&Mat4::from_translation((-grid.offset).into())).mul_mat4(&grid_to_world);
         // voxel_settings.water_to_voxel = grid_to_world;
         // voxel_settings.water_to_voxel = Mat4::IDENTITY;
-        if voxel_handle.voxel.is_none() {
-            voxel_handle.voxel = Some(crate::voxelize::create_voxel_texture(grid, &mut images));
-            voxel_handle.sdf = Some(crate::voxelize::create_sdf_texture(grid, &mut images));
+        if textures.get(WaterTexture::Voxel).is_none() {
+            textures.insert(WaterTexture::Voxel, crate::voxelize::create_voxel_texture(grid, &mut images));
+            textures.insert(WaterTexture::Sdf, crate::voxelize::create_sdf_texture(grid, &mut images));
         }
     }
 }

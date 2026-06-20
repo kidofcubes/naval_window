@@ -3,12 +3,13 @@ use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph;
 use bevy::render::render_graph::{NodeRunError, RenderGraphContext, RenderLabel};
-use bevy::render::render_resource::{encase, AddressMode, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, FilterMode, PipelineCache, Sampler, SamplerDescriptor, ShaderStages, StorageTextureAccess, TextureFormat};
+use bevy::render::render_resource::{encase, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, PipelineCache, Sampler, ShaderStages, StorageTextureAccess, TextureFormat};
 use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, texture_3d, texture_storage_2d, texture_storage_2d_array, uniform_buffer};
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
 use strum::AsRefStr;
-use crate::watering::{VoxelGridHandle, VoxelSettings, WaterDebugSettings, WaterSettings, WaterWaveGroupSpeeds, DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH, WaterSimulationHandles};
+use crate::watering::{VoxelSettings, WaterDebugSettings, WaterPingPong, WaterSettings, WaterTexture, WaterTextures, WaterWaveGroupSpeeds};
+use crate::watering::shader_utils::{create_clamp_linear_sampler, encode_uniform, grid_workgroups, profile_workgroups};
 
 // ─── Pass / Buffer Enums ─────────────────────────────────────────────────────
 
@@ -68,8 +69,8 @@ impl render_graph::Node for WaterSimulationNode {
         let Some(bgs)      = world.get_resource::<WaterBindGroups>() else { return Ok(()) };
 
         // ── Workgroup counts ───────────────────────────────────────────────
-        let wg_grid    = (GRID_X_SIZE.div_ceil(32) as u32, GRID_Z_SIZE.div_ceil(32) as u32, DIRECTIONS as u32);
-        let wg_profile = (PROFILE_BUFFER_LENGTH.div_ceil(128) as u32, 1, 1);
+        let wg_grid    = grid_workgroups();
+        let wg_profile = profile_workgroups();
 
         let passes_to_run = [
             (ComputePasses::WaterInject, wg_grid),
@@ -114,17 +115,8 @@ pub fn prepare_gpu_resources(
     if existing.is_some() {
         return;
     }
-    // ── Amplitude sampler ─────────────────────────────────────────────────
-    let clamp_linear_sampler = render_device.create_sampler(&SamplerDescriptor {
-        label:           Some("amplitude_sampler"),
-        address_mode_u:  AddressMode::ClampToEdge,
-        address_mode_v:  AddressMode::ClampToEdge,
-        mag_filter:      FilterMode::Linear,
-        min_filter:      FilterMode::Linear,
-        ..default()
-    });
     commands.insert_resource(WaterGpuResources {
-        clamp_linear_sampler,
+        clamp_linear_sampler: create_clamp_linear_sampler(&render_device),
     });
 }
 
@@ -220,45 +212,35 @@ pub fn queue_bind_groups(
     settings:      Res<WaterSettings>,
     debug_settings: Res<WaterDebugSettings>,
     voxel_settings: Res<VoxelSettings>,
-    voxel_handle:  Res<VoxelGridHandle>,
     water_wave_group_speeds:  Res<WaterWaveGroupSpeeds>,
     existing_bgs:  Option<ResMut<WaterBindGroups>>,
-    // hf_handle:     Option<ResMut<HeightFieldHandle>>,
-    sim_handle:     Option<ResMut<WaterSimulationHandles>>,
+    textures:      Res<WaterTextures>,
+    ping_pong:     Res<WaterPingPong>,
     render_images: Res<RenderAssets<GpuImage>>,
     queue:         Res<bevy::render::renderer::RenderQueue>,
     pipeline_cache: Res<PipelineCache>,
 ) {
     let Some(gpu) = gpu else { return };
-    let Some(sim_handle) = sim_handle else { return };
 
-    let Some(amp_a) = render_images.get(&sim_handle.amplitude_texture_a) else { return };
-    let Some(amp_b) = render_images.get(&sim_handle.amplitude_texture_b) else { return };
-    let Some(profile_buffer) = render_images.get(&sim_handle.profile_buffer) else { return };
+    let lookup = |key: WaterTexture| -> Option<&GpuImage> {
+        textures.get(key).and_then(|h| render_images.get(h))
+    };
 
-    let Some(voxel_handle_inner) = &voxel_handle.voxel else { return };
-    let Some(voxel_gpu_image) = render_images.get(voxel_handle_inner) else { return };
+    let Some(amp_a) = lookup(WaterTexture::AmplitudeA) else { return };
+    let Some(amp_b) = lookup(WaterTexture::AmplitudeB) else { return };
+    let Some(profile) = lookup(WaterTexture::Profile) else { return };
+    let Some(voxel_gpu_image) = lookup(WaterTexture::Voxel) else { return };
+    let Some(sdf_gpu_image) = lookup(WaterTexture::Sdf) else { return };
+
     let voxel_texture_view = &voxel_gpu_image.texture_view;
-
-    let Some(sdf_handle) = &voxel_handle.sdf else { return };
-    let Some(sdf_gpu_image) = render_images.get(sdf_handle) else { return };
     let sdf_texture_view = &sdf_gpu_image.texture_view;
-
-    // ── Helper: encode a ShaderType into a uniform buffer ────────────────────
-    macro_rules! encode_uniform {
-        ($data:expr) => {{
-            let mut buf = encase::UniformBuffer::new(Vec::<u8>::new());
-            buf.write($data).expect("ShaderType write failed");
-            buf.into_inner()
-        }};
-    }
 
     // ── Create or update the uniform buffers ────────────────────────────────
     let buffers: HashMap<Buffers, Buffer> = if let Some(bgs) = existing_bgs {
         // Update existing buffers in-place.
-        queue.write_buffer(&bgs.buffers[&Buffers::Settings], 0, &encode_uniform!(&*settings));
-        queue.write_buffer(&bgs.buffers[&Buffers::DebugSettings], 0, &encode_uniform!(&*debug_settings));
-        queue.write_buffer(&bgs.buffers[&Buffers::VoxelSettings], 0, &encode_uniform!(&*voxel_settings));
+        queue.write_buffer(&bgs.buffers[&Buffers::Settings], 0, &encode_uniform(&*settings));
+        queue.write_buffer(&bgs.buffers[&Buffers::DebugSettings], 0, &encode_uniform(&*debug_settings));
+        queue.write_buffer(&bgs.buffers[&Buffers::VoxelSettings], 0, &encode_uniform(&*voxel_settings));
         // WaterWaveGroupSpeeds doesn't change at runtime.
 
         bgs.buffers.clone()
@@ -272,9 +254,9 @@ pub fn queue_bind_groups(
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
 
-        bufs.insert(Buffers::Settings, mk("water_settings_buf", encode_uniform!(&*settings)));
-        bufs.insert(Buffers::DebugSettings, mk("water_debug_settings_buf", encode_uniform!(&*debug_settings)));
-        bufs.insert(Buffers::VoxelSettings, mk("water_voxel_settings_buf", encode_uniform!(&*voxel_settings)));
+        bufs.insert(Buffers::Settings, mk("water_settings_buf", encode_uniform(&*settings)));
+        bufs.insert(Buffers::DebugSettings, mk("water_debug_settings_buf", encode_uniform(&*debug_settings)));
+        bufs.insert(Buffers::VoxelSettings, mk("water_voxel_settings_buf", encode_uniform(&*voxel_settings)));
 
         // WaterWaveGroupSpeeds uses dynamic alignment
         let mut dyn_buf = encase::DynamicUniformBuffer::new_with_alignment(Vec::<u8>::new(), 32);
@@ -284,7 +266,7 @@ pub fn queue_bind_groups(
         bufs
     };
 
-    let (amp_read, amp_write) = if sim_handle.flipped {
+    let (amp_read, amp_write) = if ping_pong.flipped {
         (&amp_b.texture_view, &amp_a.texture_view)
     } else {
         (&amp_a.texture_view, &amp_b.texture_view)
@@ -343,7 +325,7 @@ pub fn queue_bind_groups(
         "profile_bg",
         &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::WaterProfile)),
         &BindGroupEntries::sequential((
-            &profile_buffer.texture_view,
+            &profile.texture_view,
             settings_buf.as_entire_binding(),
         )),
     ));
