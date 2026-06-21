@@ -82,10 +82,10 @@ fn sample_amplitude(x: f32, z: f32, theta_index: u32, zeta_index: u32) -> f32 {
 //        return 0.0;
 //    }
 
-//    return textureSampleLevel(amplitude_texture, amplitude_sampler, uv, layer, 0.0).x;
+    return textureSampleLevel(amplitude_texture, amplitude_sampler, uv, layer, 0.0).x;
 
     //when x is 512 and z is 512, should be
-    return textureLoad(amplitude_texture, vec2<i32>(i32(floor(x)),i32(floor(z))), layer, 0).x;
+//    return textureLoad(amplitude_texture, vec2<i32>(i32(floor(x)),i32(floor(z))), layer, 0).x;
 }
 
 fn sample_profile(x: f32, z: f32, theta_index: u32, zeta_index: u32, period: f32, dir: vec2<f32>) -> vec4<f32>{
@@ -266,7 +266,7 @@ fn translate_vertex(vertex: Vertex) -> VertexOutput {
 
     // Calculate water displacement using UV coordinates
     var offset: vec3<f32> = calculate_water_offset(uv_from_world(orig_world_position.xyz)) * 1.0;
-    offset = vec3<f32>(0.0,0.0,0.0);
+//    offset = vec3<f32>(0.0,0.0,0.0);
 
     let position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);
 
@@ -277,7 +277,7 @@ fn translate_vertex(vertex: Vertex) -> VertexOutput {
 
     out.world_position = world_from_local * position;
     out.uv = vertex.uv;
-//    out.world_nonrmal = vec3(0.0,0.0,0.0);
+//    out.world_normal = vec3(0.0,0.0,0.0);
 
 //#ifdef PREPASS_PIPELINE
 #ifdef NORMAL_PREPASS_OR_DEFERRED_PREPASS

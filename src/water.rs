@@ -11,7 +11,7 @@ use bevy::shader::{ShaderDefVal, ShaderRef};
 use rand::{random, random_bool, random_range};
 use crate::{watering, BuildData};
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
-use crate::watering::{VoxelSettings, Watering, WaterPingPong, WaterTexture, WaterTextures};
+use crate::watering::{VoxelSettings, Watering, WaterPingPong, GpuTexture, GpuTextures};
 use crate::watering::water_lod::WaterLodPlugin;
 
 const SHADER_ASSET_PATH: &str = "custom_material.wgsl";
@@ -43,9 +43,10 @@ fn setup(
     // mut custom_materials: ResMut<Assets<CustomMaterial>>,
     mut extended_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, CustomMaterial>>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    water_textures: Res<WaterTextures>,
+    water_textures: Res<GpuTextures>,
     asset_server: Res<AssetServer>,
 ) {
+    println!("SETUPING");
 
     // let mesh = Mesh::from(Plane3d {
     //         half_size: Vec2::new(50.0, 50.0),
@@ -90,8 +91,8 @@ fn setup(
         voxel_transform: Mat4::IDENTITY,
         voxel_size: 0.5,
         voxel_grid: null_texture(images.as_mut(), TextureDimension::D3, TextureFormat::R8Uint),
-        amplitude_texture: water_textures.get(WaterTexture::AmplitudeA).cloned().expect("AmplitudeA texture not initialized"),
-        profile_buffer: water_textures.get(WaterTexture::Profile).cloned().expect("Profile texture not initialized"),
+        amplitude_texture: water_textures.get(GpuTexture::AmplitudeA).cloned().expect("AmplitudeA texture not initialized"),
+        profile_buffer: water_textures.get(GpuTexture::Profile).cloned().expect("Profile texture not initialized"),
     };
 
     let material = ExtendedMaterial {
@@ -128,13 +129,13 @@ fn update(
     mut images: ResMut<Assets<Image>>,
     key: Res<ButtonInput<KeyCode>>,
     mut voxel_settings: ResMut<VoxelSettings>,
-    water_textures: Res<WaterTextures>,
+    water_textures: Res<GpuTextures>,
     mut ping_pong: ResMut<WaterPingPong>,
     time: Res<Time>,
     mut gizmo: Gizmos,
 ){
     ping_pong.flipped = !ping_pong.flipped;
-    let current_amp_key = if ping_pong.flipped { WaterTexture::AmplitudeB } else { WaterTexture::AmplitudeA };
+    let current_amp_key = if ping_pong.flipped { GpuTexture::AmplitudeB } else { GpuTexture::AmplitudeA };
     let Some(amp_handle) = water_textures.get(current_amp_key).cloned() else { return };
     for (_, mut material) in materials.iter_mut() {
         material.extension.time = (time.elapsed().as_millis() as f32 / 1000.0) as f32;

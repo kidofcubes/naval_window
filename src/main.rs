@@ -99,7 +99,7 @@ fn temp_test_update(
             let config = VoxelizationConfig {
                 resolution: 64,
                 min_voxel_size: Some(0.25),
-                max_voxel_size: Some(0.25),
+                max_voxel_size: Some(1.00),
             };
             
             // Voxelize the meshes
@@ -456,10 +456,10 @@ fn main() {
             //     init_paths: data_paths.unwrap(),
             // },
             WireframePlugin::default(),
-            // WaterPlugin,
+            WaterPlugin,
             CameraMovementPlugin,
             MeshPickingPlugin,
-            BigWatering,
+            // BigWatering,
             //OutlinePlugin,
         ))
         .add_systems(Startup, (setup).chain())

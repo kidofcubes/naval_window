@@ -8,7 +8,7 @@ use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, te
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
 use strum::AsRefStr;
-use crate::watering::{VoxelSettings, WaterDebugSettings, WaterPingPong, WaterSettings, WaterTexture, WaterTextures, WaterWaveGroupSpeeds};
+use crate::watering::{VoxelSettings, WaterDebugSettings, WaterPingPong, WaterSettings, GpuTexture, GpuTextures, WaterWaveGroupSpeeds};
 use crate::watering::shader_utils::{create_clamp_linear_sampler, encode_uniform, grid_workgroups, profile_workgroups};
 
 // ─── Pass / Buffer Enums ─────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ pub fn queue_bind_groups(
     voxel_settings: Res<VoxelSettings>,
     water_wave_group_speeds:  Res<WaterWaveGroupSpeeds>,
     existing_bgs:  Option<ResMut<WaterBindGroups>>,
-    textures:      Res<WaterTextures>,
+    textures:      Res<GpuTextures>,
     ping_pong:     Res<WaterPingPong>,
     render_images: Res<RenderAssets<GpuImage>>,
     queue:         Res<bevy::render::renderer::RenderQueue>,
@@ -222,15 +222,15 @@ pub fn queue_bind_groups(
 ) {
     let Some(gpu) = gpu else { return };
 
-    let lookup = |key: WaterTexture| -> Option<&GpuImage> {
+    let lookup = |key: GpuTexture| -> Option<&GpuImage> {
         textures.get(key).and_then(|h| render_images.get(h))
     };
 
-    let Some(amp_a) = lookup(WaterTexture::AmplitudeA) else { return };
-    let Some(amp_b) = lookup(WaterTexture::AmplitudeB) else { return };
-    let Some(profile) = lookup(WaterTexture::Profile) else { return };
-    let Some(voxel_gpu_image) = lookup(WaterTexture::Voxel) else { return };
-    let Some(sdf_gpu_image) = lookup(WaterTexture::Sdf) else { return };
+    let Some(amp_a) = lookup(GpuTexture::AmplitudeA) else { return };
+    let Some(amp_b) = lookup(GpuTexture::AmplitudeB) else { return };
+    let Some(profile) = lookup(GpuTexture::Profile) else { return };
+    let Some(voxel_gpu_image) = lookup(GpuTexture::Voxel) else { return };
+    let Some(sdf_gpu_image) = lookup(GpuTexture::Sdf) else { return };
 
     let voxel_texture_view = &voxel_gpu_image.texture_view;
     let sdf_texture_view = &sdf_gpu_image.texture_view;

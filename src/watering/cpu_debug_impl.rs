@@ -98,14 +98,14 @@ fn layer_index(theta_index: usize, zeta_index: usize) -> usize {
 /// Modulo that handles negative numbers correctly
 #[inline]
 fn modulo(x: f32, n: f32) -> f32 {
-    x - (x / n).floor() * n
+    x - ((x / n).floor() * n)
 }
 
 // SYSTEMS
 #[derive(Resource)]
 pub struct CpuDebugWateringResources {
-    pub amplitude_buffer: AmplitudeBuffer,
-    pub profile_buffer: ProfileBuffer,
+    pub amplitude_buffer: AmplitudeBuffer, //amplitudes for each zeta and direction and position
+    pub profile_buffer: ProfileBuffer, //for each zeta index and then profile length
     pub height_buffer: HeightBuffer,
     pub normal_buffer: NormalBuffer,
 }
@@ -159,7 +159,7 @@ fn update(
     }
 
     for zeta_index in 0..TOTAL_ZETA_NUMBERS {
-        let offset = vec3(-2.0 + (zeta_index as f32 * -5.0), 1.0, 0.0);
+        let offset = vec3(-2.0 + (zeta_index as f32 * -1.0), 1.0, 0.0);
         for i in 0..PROFILE_BUFFER_LENGTH {
             let num = cpu_debug_watering_resources.profile_buffer[zeta_index][i];
             let pos = offset + vec3(0.0, 0.0, (i as f32)/100.0);
@@ -279,7 +279,7 @@ pub fn inject_amplitude(
                         f32::cos((-phase_coordinate) + (0.0))
                     );
 
-                    amplitude_out[layer][z][x] = amplitude;
+                    amplitude_out[layer][z][x] = amplitude * debug_settings.scale;
                     // amplitude_out[layer][z][x] = vec2(debug_settings.scale, 0.0);
                 }
             }
@@ -401,19 +401,19 @@ pub fn build_profile(profile_out: &mut ProfileBuffer, settings: &WaterSettings) 
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Height field output: [render_z][render_x] -> (offset_x, offset_y, offset_z, 1.0)
-pub type HeightBuffer = Vec<Vec<[f32; 4]>>;
+pub type HeightBuffer = Vec<Vec<Vec4>>;
 
 /// Normal field output: [render_z][render_x] -> (nx, ny, nz, 1.0)
-pub type NormalBuffer = Vec<Vec<[f32; 4]>>;
+pub type NormalBuffer = Vec<Vec<Vec4>>;
 
 /// Create a new height buffer initialized to zero
 pub fn new_height_buffer() -> HeightBuffer {
-    vec![vec![[0.0, 0.0, 0.0, 1.0]; RENDER_X_SIZE]; RENDER_Z_SIZE]
+    vec![vec![Vec4::ZERO; RENDER_X_SIZE]; RENDER_Z_SIZE]
 }
 
 /// Create a new normal buffer initialized to zero
 pub fn new_normal_buffer() -> NormalBuffer {
-    vec![vec![[0.0, 1.0, 0.0, 1.0]; RENDER_X_SIZE]; RENDER_Z_SIZE]
+    vec![vec![Vec4::ZERO; RENDER_X_SIZE]; RENDER_Z_SIZE]
 }
 
 /// Sample amplitude with bilinear interpolation
@@ -497,7 +497,7 @@ pub fn reconstruct_height(
                         PROFILE_BUFFER_LENGTH as f32 * (profile_coord / period),
                         PROFILE_BUFFER_LENGTH as f32,
                     ) as usize;
-                    // let index = index.min(PROFILE_BUFFER_LENGTH - 1);
+                    let index = index.min(PROFILE_BUFFER_LENGTH - 1);
 
                     // Load profile values (scaled by direction multiplier)
                     let cos_val = profile_in[zeta_index][index] * direction_multiplier;
@@ -519,7 +519,7 @@ pub fn reconstruct_height(
             //     [0.0, 1.0, 0.0]
             // };
 
-            height_out[render_z][render_x] = [surface_offset[0], surface_offset[1], surface_offset[2], 1.0];
+            height_out[render_z][render_x] = Vec4::new(surface_offset[0], surface_offset[1], surface_offset[2], 1.0);
             // normal_out[render_z][render_x] = [normal[0], normal[1], normal[2], 1.0];
         }
     }

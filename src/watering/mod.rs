@@ -40,7 +40,7 @@ impl Plugin for Watering{
                 voxel_size: 0.0,
                 grid_dims: Default::default(),
             })
-            .insert_resource(WaterTextures::default())
+            .insert_resource(GpuTextures::default())
             .insert_resource(WaterPingPong::default())
             .insert_resource(WaterWaveGroupSpeeds {
                 wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_ZETA_NUMBERS).iter().map(|x| vec4(*x * GRID_SCALE, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap()
@@ -53,13 +53,13 @@ impl Plugin for Watering{
         // .add_systems(Update, (tick_water_time, sync_ship_position))
         ;
 
-        if(true) {
+        if(false) {
             app
                 .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterDebugSettings>::default())
                 .add_plugins(ExtractResourcePlugin::<VoxelSettings>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterWaveGroupSpeeds>::default())
-                .add_plugins(ExtractResourcePlugin::<WaterTextures>::default())
+                .add_plugins(ExtractResourcePlugin::<GpuTextures>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterPingPong>::default())
             ;
             let render_app = app.sub_app_mut(RenderApp);
@@ -121,25 +121,25 @@ pub fn setup_textures(
         depth_or_array_layers: 1,
     };
 
-    let mut textures = WaterTextures::default();
+    let mut textures = GpuTextures::default();
     textures.insert(
-        WaterTexture::HeightOffsets,
+        GpuTexture::HeightOffsets,
         images.add(make_storage_image("height_field_mat", render_size, TextureFormat::Rgba32Float)),
     );
     textures.insert(
-        WaterTexture::HeightNormals,
+        GpuTexture::HeightNormals,
         images.add(make_storage_image("normal_field_mat", render_size, TextureFormat::Rgba32Float)),
     );
     textures.insert(
-        WaterTexture::AmplitudeA,
+        GpuTexture::AmplitudeA,
         images.add(make_storage_image("amplitude_texture_a", amplitude_size, TextureFormat::R32Float)),
     );
     textures.insert(
-        WaterTexture::AmplitudeB,
+        GpuTexture::AmplitudeB,
         images.add(make_storage_image("amplitude_texture_b", amplitude_size, TextureFormat::R32Float)),
     );
     textures.insert(
-        WaterTexture::Profile,
+        GpuTexture::Profile,
         images.add(make_storage_image("profile_buffer", profile_size, TextureFormat::Rgba32Float)),
     );
 
@@ -242,7 +242,7 @@ pub struct WaterSettings {
 
 /// Keys for every `Handle<Image>` the watering pipeline owns.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub enum WaterTexture {
+pub enum GpuTexture {
     HeightOffsets,
     HeightNormals,
     AmplitudeA,
@@ -254,15 +254,15 @@ pub enum WaterTexture {
 
 /// Single resource for every texture handle used by the watering pipeline.
 #[derive(Resource, ExtractResource, Clone, Default)]
-pub struct WaterTextures {
-    pub map: HashMap<WaterTexture, Handle<Image>>,
+pub struct GpuTextures {
+    pub map: HashMap<GpuTexture, Handle<Image>>,
 }
 
-impl WaterTextures {
-    pub fn get(&self, key: WaterTexture) -> Option<&Handle<Image>> {
+impl GpuTextures {
+    pub fn get(&self, key: GpuTexture) -> Option<&Handle<Image>> {
         self.map.get(&key)
     }
-    pub fn insert(&mut self, key: WaterTexture, handle: Handle<Image>) {
+    pub fn insert(&mut self, key: GpuTexture, handle: Handle<Image>) {
         self.map.insert(key, handle);
     }
 }
@@ -275,11 +275,11 @@ pub struct WaterPingPong {
 
 impl WaterPingPong {
     /// Returns (read_key, write_key) for the amplitude ping-pong this frame.
-    pub fn amplitude_keys(&self) -> (WaterTexture, WaterTexture) {
+    pub fn amplitude_keys(&self) -> (GpuTexture, GpuTexture) {
         if self.flipped {
-            (WaterTexture::AmplitudeB, WaterTexture::AmplitudeA)
+            (GpuTexture::AmplitudeB, GpuTexture::AmplitudeA)
         } else {
-            (WaterTexture::AmplitudeA, WaterTexture::AmplitudeB)
+            (GpuTexture::AmplitudeA, GpuTexture::AmplitudeB)
         }
     }
 }
@@ -329,7 +329,7 @@ impl Default for VoxelSettings {
 fn sync_voxel_grid(
     build_data: Res<BuildData>,
     mut voxel_settings: ResMut<VoxelSettings>,
-    mut textures: ResMut<WaterTextures>,
+    mut textures: ResMut<GpuTextures>,
     mut images: ResMut<Assets<Image>>,
 ) {
     if let Some(ref grid) = build_data.voxel_grid {
@@ -349,9 +349,9 @@ fn sync_voxel_grid(
         voxel_settings.water_to_voxel = Mat4::from_scale(Vec3::splat(1.0/grid.voxel_size)).mul_mat4(&Mat4::from_translation((-grid.offset).into())).mul_mat4(&grid_to_world);
         // voxel_settings.water_to_voxel = grid_to_world;
         // voxel_settings.water_to_voxel = Mat4::IDENTITY;
-        if textures.get(WaterTexture::Voxel).is_none() {
-            textures.insert(WaterTexture::Voxel, crate::voxelize::create_voxel_texture(grid, &mut images));
-            textures.insert(WaterTexture::Sdf, crate::voxelize::create_sdf_texture(grid, &mut images));
+        if textures.get(GpuTexture::Voxel).is_none() {
+            textures.insert(GpuTexture::Voxel, crate::voxelize::create_voxel_texture(grid, &mut images));
+            textures.insert(GpuTexture::Sdf, crate::voxelize::create_sdf_texture(grid, &mut images));
         }
     }
 }
