@@ -14,6 +14,7 @@ use bevy::ecs::system::IntoResult;
 use bevy::light::{CascadeShadowConfig, CascadeShadowConfigBuilder};
 use bevy::math::Affine3A;
 use bevy::pbr::DefaultOpaqueRendererMethod;
+use bevy::pbr::wireframe::WireframeTopology;
 use bevy::picking::mesh_picking::ray_cast::SimplifiedMesh;
 use bevy::render::render_resource::{TextureDimension, TextureFormat};
 use naval_sketch::bevy_plugin::{argb_slice_to_color, place_part, BasePartMesh, NavalSketchPlugin};
@@ -39,7 +40,7 @@ fn temp_test_update(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut build_data: ResMut<BuildData>,
     mut light: Query<(Entity, &DirectionalLight)>,
-    scenes: ResMut<Assets<Scene>>,
+    scenes: ResMut<Assets<WorldAsset>>,
     parent_query: Query<&ChildOf>,
     base_part_query: Query<(Entity, &BasePart)>,
     mut visibility_query: Query<(Entity, &mut Visibility)>,
@@ -326,7 +327,8 @@ fn setup(
         DirectionalLight {
             illuminance: 8000.0,
             color: Color::srgb(1.0, 0.83, 0.71),
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
+            // shadows_enabled: true,
             // soft_shadow_size: None,
             ..default()
         },
@@ -396,11 +398,11 @@ fn main() {
 
 
     let mut default_plugins = DefaultPlugins.set(RenderPlugin {
-        render_creation: RenderCreation::Automatic(WgpuSettings {
+        render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
             // WARN this is a native only feature. It will not work with webgl or webgpu
             // features: WgpuFeatures::POLYGON_MODE_LINE,
             ..default()
-        }),
+        })),
         ..default()
     }).set(
         AssetPlugin {
@@ -443,6 +445,8 @@ fn main() {
             // Controls the default color of all wireframes. Used as the default color for global wireframes.
             // Can be changed per mesh using the `WireframeColor` component.
             default_color: Color::WHITE,
+            default_line_width: 3.0,
+            default_topology: WireframeTopology::Triangles,
         })
         .insert_resource(BuildData{
             root_ship_entity: None,

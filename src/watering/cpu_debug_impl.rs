@@ -176,6 +176,17 @@ fn update(
                 Color::srgba(1.0, 0.0, (i as f32 / PROFILE_BUFFER_LENGTH as f32), 1.0),
             );
         }
+        for i in 0..zeta_index {
+            let pos = offset + vec3(0.0, 0.0, -0.05+(-0.05*i as f32));
+            gizmos.line(
+                pos,
+                // pos + vec3(0.1, 0.0, 0.0),
+                pos + vec3(-0.1, 0.0, 0.0),
+                // pos + vec3(0.1, cpu_debug_watering_resources.profile_buffer[zeta_index][(i+(((6*PROFILE_BUFFER_LENGTH)/4)))%PROFILE_BUFFER_LENGTH].x, 0.0),
+                Color::srgba(1.0, 0.0, 1.0, 1.0),
+            )
+            // gizmos.
+        }
     }
 
     let offset = vec3(-0.0, 1.0, 0.0);
@@ -234,8 +245,9 @@ pub fn inject_amplitude(
             //     continue;
             // }
 
-            for theta_index in 0..DIRECTIONS {
-                let theta_index = 0;
+            // for theta_index in 0..DIRECTIONS {
+            for theta_index in 0..1{
+                // let theta_index = 0;
                 let theta = index_to_radians(theta_index);
                 let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
 
@@ -266,8 +278,8 @@ pub fn inject_amplitude(
                     ) as usize;
 
                     let spatial_phase =
-                        (wave_number1 * (position_offset + DIRECTIONAL_OFFSETS[theta_index]))
-                        - (dispersion_relation(wave_number1) * water_settings.elapsed_time);
+                        (wave_number0 * (position_offset + DIRECTIONAL_OFFSETS[theta_index]))
+                        - (dispersion_relation(wave_number0) * water_settings.elapsed_time);
                     let phase_coordinate = spatial_phase;
 
                     // Create amplitude with correct phase

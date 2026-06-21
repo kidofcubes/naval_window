@@ -5,13 +5,12 @@ pub(crate) mod shader_utils;
 
 use std::collections::HashMap;
 use bevy::app::{App, Plugin, Startup, Update};
-use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
+use bevy::core_pipeline::{Core3d, Core3dSystems};
 use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::render_resource::{Extent3d, ShaderType, TextureFormat};
 use crate::BuildData;
 use bevy::render::{Render, RenderApp, RenderSystems};
-use bevy::render::render_graph::RenderGraphExt;
 use crate::watering::cpu_debug_impl::CpuDebugWatering;
 use crate::watering::shader_utils::{compute_group_speeds, make_storage_image};
 
@@ -80,13 +79,10 @@ impl Plugin for Watering{
 
             // use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
             // use bevy::render::render_graph::RenderGraphApp;
-            render_app
-                .add_render_graph_node::<compute_shader::WaterSimulationNode>(
-                    Core3d,
-                    compute_shader::WaterNodeLabel,
-                )
-                // Run our compute passes before the main 3D pass
-                .add_render_graph_edge(Core3d, compute_shader::WaterNodeLabel, Node3d::EarlyPrepass);
+            render_app.add_systems(
+                Core3d,
+                compute_shader::render_pass.in_set(Core3dSystems::Prepass)
+            );
         }else{
             app.add_plugins(CpuDebugWatering);
         }

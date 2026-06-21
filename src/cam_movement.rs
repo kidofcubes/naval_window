@@ -104,7 +104,7 @@ pub fn spawn_player(
                 ..default()
             },
             Skybox {
-                image: asset_server.load("environment/kloppenheim_06_puresky_4k_cubemap.ktx2"),
+                image: Some(asset_server.load("environment/kloppenheim_06_puresky_4k_cubemap.ktx2")),
                 brightness: 100.0,
                 ..default()
             }
@@ -119,20 +119,20 @@ pub fn spawn_player(
 
 /// Spawn a bit of UI text to explain how to move the player.
 pub fn spawn_text(mut commands: Commands) {
-    commands
-        .spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        })
-        .with_child((
-            Text::new("Move the player with WASD"),
-            TextFont {
-                font_size: 25.0,
-                ..default()
-            },
-        ));
+    // commands
+    //     .spawn(Node {
+    //         position_type: PositionType::Absolute,
+    //         bottom: Val::Px(12.0),
+    //         left: Val::Px(12.0),
+    //         ..default()
+    //     })
+    //     .with_child((
+    //         Text::new("Move the player with WASD"),
+    //         TextFont {
+    //             font_size: 25.0,
+    //             ..default()
+    //         },
+    //     ));
 }
 
 /// Handle keyboard input and accumulate it in the `AccumulatedInput` component.
@@ -227,7 +227,7 @@ pub fn move_player(
     accumulated_mouse_motion: Res<AccumulatedMouseMotion>,
     accumulated_mouse_scroll: Res<AccumulatedMouseScroll>,
     hover_map: Res<HoverMap>,
-    ui_nodes: Query<&Node>,
+    // ui_nodes: Query<&Node>,
     windows: Query<&mut Window>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut player: Query<&mut Transform, With<EditorCamera>>,
@@ -269,13 +269,13 @@ pub fn move_player(
     }
     
 
-    for (_pointer, pointer_map) in hover_map.iter() {
-        for (entity, _hit) in pointer_map.iter() {
-            if ui_nodes.contains(*entity) {
-                return; //skip scroll movement when in ui
-            }
-        }
-    }
+    // for (_pointer, pointer_map) in hover_map.iter() {
+    //     for (entity, _hit) in pointer_map.iter() {
+    //         if ui_nodes.contains(*entity) {
+    //             return; //skip scroll movement when in ui
+    //         }
+    //     }
+    // }
 
     let mut translation = Vec3::ZERO;
 

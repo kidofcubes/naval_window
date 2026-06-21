@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssets;
-use bevy::render::render_graph;
-use bevy::render::render_graph::{NodeRunError, RenderGraphContext, RenderLabel};
 use bevy::render::render_resource::{encase, BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferInitDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, PipelineCache, Sampler, ShaderStages, StorageTextureAccess, TextureFormat};
 use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, texture_3d, texture_storage_2d, texture_storage_2d_array, uniform_buffer};
 use bevy::render::renderer::{RenderContext, RenderDevice};
@@ -50,61 +48,48 @@ pub struct WaterGpuResources {
     pub clamp_linear_sampler: Sampler,
 }
 
+pub fn render_pass(
+    world: &World,
+    // view: ViewQuery<(&ExtractedCamera, &ViewTarget)>,
+    mut ctx: RenderContext,
+) -> Result<()> {
+    let pipeline_cache = world.resource::<PipelineCache>();
+    let pipelines      = world.resource::<WaterPipelines>();
+    let Some(bgs)      = world.get_resource::<WaterBindGroups>() else { return Ok(()) };
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-pub struct WaterNodeLabel;
+    // ── Workgroup counts ───────────────────────────────────────────────
+    let wg_grid    = grid_workgroups();
+    let wg_profile = profile_workgroups();
 
-#[derive(Default)]
-pub struct WaterSimulationNode;
+    let passes_to_run = [
+        (ComputePasses::WaterInject, wg_grid),
+        (ComputePasses::WaterAdvection, wg_grid),
+        (ComputePasses::WaterDiffusion, wg_grid),
+        (ComputePasses::WaterProfile, wg_profile),
+    ];
 
-impl render_graph::Node for WaterSimulationNode {
-    fn run(
-        &self,
-        _graph:  &mut RenderGraphContext,
-        ctx:     &mut RenderContext,
-        world:   &World,
-    ) -> Result<(), NodeRunError> {
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let pipelines      = world.resource::<WaterPipelines>();
-        let Some(bgs)      = world.get_resource::<WaterBindGroups>() else { return Ok(()) };
-
-        // ── Workgroup counts ───────────────────────────────────────────────
-        let wg_grid    = grid_workgroups();
-        let wg_profile = profile_workgroups();
-
-        let passes_to_run = [
-            (ComputePasses::WaterInject, wg_grid),
-            (ComputePasses::WaterAdvection, wg_grid),
-            (ComputePasses::WaterDiffusion, wg_grid),
-            (ComputePasses::WaterProfile, wg_profile),
-        ];
-
-        // Resolve all pipelines + bind groups; bail if any aren't ready.
-        let mut resolved = Vec::with_capacity(passes_to_run.len());
-        for (pass, wg) in &passes_to_run {
-            let Some((_, pipeline_id)) = pipelines.passes.get(pass) else { return Ok(()) };
-            let Some(pipeline) = pipeline_cache.get_compute_pipeline(*pipeline_id) else { return Ok(()) };
-            let Some(bg) = bgs.bind_groups.get(pass) else { return Ok(()) };
-            resolved.push((pass.as_ref(), pipeline, bg, *wg));
-        }
-
-        let encoder = ctx.command_encoder();
-        for (label, pipeline, bg, wg) in resolved {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label:            Some(label),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, bg, &[]);
-            pass.dispatch_workgroups(wg.0, wg.1, wg.2);
-        }
-
-        Ok(())
+    // Resolve all pipelines + bind groups; bail if any aren't ready.
+    let mut resolved = Vec::with_capacity(passes_to_run.len());
+    for (pass, wg) in &passes_to_run {
+        let Some((_, pipeline_id)) = pipelines.passes.get(pass) else { return Ok(()) };
+        let Some(pipeline) = pipeline_cache.get_compute_pipeline(*pipeline_id) else { return Ok(()) };
+        let Some(bg) = bgs.bind_groups.get(pass) else { return Ok(()) };
+        resolved.push((pass.as_ref(), pipeline, bg, *wg));
     }
+
+    let encoder = ctx.command_encoder();
+    for (label, pipeline, bg, wg) in resolved {
+        let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label:            Some(label),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, bg, &[]);
+        pass.dispatch_workgroups(wg.0, wg.1, wg.2);
+    }
+
+    Ok(())
 }
-
-
-
 
 pub fn prepare_gpu_resources(
     mut commands: Commands,
@@ -139,11 +124,11 @@ macro_rules! compute_pipeline {
         let id = $pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label:                           Some(label.into()),
             layout:                          vec![layout.clone()],
-            push_constant_ranges:            vec![],
             shader:                          $asset_server.load(pass.wgsl_path()),
             shader_defs:                     vec![],
             entry_point:                     Some("main".into()),
             zero_initialize_workgroup_memory: false,
+            ..default()
         });
         $passes_map.insert(pass, (layout, id));
     }};

@@ -6,7 +6,7 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_resource::Face;
 use num_complex::Complex32;
 use phastft::planner::Direction;
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 pub struct BigWatering;
 impl Plugin for BigWatering {
@@ -132,7 +132,7 @@ fn ifft_2d(
     // Row pass
     for row in grid.iter_mut() {
         scratch.copy_from_slice(row);
-        phastft::fft_32_interleaved(scratch, Direction::Reverse);
+        phastft::fft_f32_dit_interleaved(scratch, Direction::Inverse);
         row.copy_from_slice(scratch);
     }
 
@@ -142,7 +142,7 @@ fn ifft_2d(
             scratch[row] = grid[row][col];
         }
 
-        phastft::fft_32_interleaved(scratch, Direction::Reverse);
+        phastft::fft_f32_dit_interleaved(scratch, Direction::Inverse);
 
         for row in 0..grid_size {
             // fftshift sign correction: (-1)^(col+row)
@@ -446,7 +446,7 @@ fn update_ocean(
 
     // Step 4: Update mesh vertices (bilinear interpolation for fractional MESH_STEP)
     if let Ok(mesh_handle) = ocean_query.single() {
-        if let Some(mesh) = meshes.get_mut(mesh_handle) {
+        if let Some(mut mesh) = meshes.get_mut(mesh_handle) {
             let vertices_per_side = (grid_size as f32 / MESH_STEP) as usize;
             if let Some(positions) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
                 if let bevy::mesh::VertexAttributeValues::Float32x3(pos) = positions {

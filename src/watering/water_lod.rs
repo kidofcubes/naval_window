@@ -351,7 +351,7 @@ fn update_water_lod(
         water.last_camera_pos = camera_pos;
 
         // Hot-swap the existing mesh asset so the entity handle stays valid.
-        if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
+        if let Some(mut mesh) = meshes.get_mut(&mesh_handle.0) {
             *mesh = build_lod_mesh(camera_pos, water.as_ref());
         }
         water.last_camera_pos = camera_pos;
