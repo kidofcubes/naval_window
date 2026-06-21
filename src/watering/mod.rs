@@ -202,8 +202,10 @@ fn debug_input_system(
 // pub const GRID_X_SIZE: usize = 256;
 // pub const GRID_Z_SIZE: usize = 256;
 
-pub const GRID_X_SIZE: usize = 256;
-pub const GRID_Z_SIZE: usize = 256;
+// pub const GRID_X_SIZE: usize = 256;
+// pub const GRID_Z_SIZE: usize = 256;
+pub const GRID_X_SIZE: usize = 64;
+pub const GRID_Z_SIZE: usize = 64;
 pub const GRID_SCALE: f32 = 1.0; //how many meters each grid cell represents
 
 // pub const DIRECTIONS: usize = 1;

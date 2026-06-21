@@ -80,7 +80,7 @@ use super::{
 // ];
 const DIRECTIONAL_OFFSETS: [f32; 64] = [0.0; 64];
 
-const INTEGRATION_STEPS: usize = 64;
+const INTEGRATION_STEPS: usize = 1;
 const PERIODICITY: f32 = 2.0;
 
 /// Convert direction index to radians
@@ -176,15 +176,20 @@ fn update(
                 Color::srgba(1.0, 0.0, (i as f32 / PROFILE_BUFFER_LENGTH as f32), 1.0),
             );
         }
+
+        gizmos.text(Isometry3d {
+            translation: (offset + vec3(0.0, 0.0, -0.1)).into(),
+            ..default()
+        }, &format!("{:?}",zeta_index), 0.1, Vec2::new(0.5,0.5), Color::srgba_u8(0,255,0,255));
         for i in 0..zeta_index {
             let pos = offset + vec3(0.0, 0.0, -0.05+(-0.05*i as f32));
-            gizmos.line(
-                pos,
-                // pos + vec3(0.1, 0.0, 0.0),
-                pos + vec3(-0.1, 0.0, 0.0),
-                // pos + vec3(0.1, cpu_debug_watering_resources.profile_buffer[zeta_index][(i+(((6*PROFILE_BUFFER_LENGTH)/4)))%PROFILE_BUFFER_LENGTH].x, 0.0),
-                Color::srgba(1.0, 0.0, 1.0, 1.0),
-            )
+            // gizmos.line(
+            //     pos,
+            //     // pos + vec3(0.1, 0.0, 0.0),
+            //     pos + vec3(-0.1, 0.0, 0.0),
+            //     // pos + vec3(0.1, cpu_debug_watering_resources.profile_buffer[zeta_index][(i+(((6*PROFILE_BUFFER_LENGTH)/4)))%PROFILE_BUFFER_LENGTH].x, 0.0),
+            //     Color::srgba(1.0, 0.0, 1.0, 1.0),
+            // )
             // gizmos.
         }
     }
@@ -254,13 +259,14 @@ pub fn inject_amplitude(
                 for zeta_index in 0..TOTAL_ZETA_NUMBERS {
                     let min_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) - 0.0) / (TOTAL_ZETA_NUMBERS as f32)));
                     let max_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) + 1.0) / (TOTAL_ZETA_NUMBERS as f32)));
-                    let zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.5) / TOTAL_ZETA_NUMBERS as f32));
-                    let period = PERIODICITY * 2.0f32.powf(max_zeta);
+                    let mid_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.5) / TOTAL_ZETA_NUMBERS as f32));
+                    // let period = PERIODICITY * 2.0f32.powf(max_zeta);
+                    let period = PERIODICITY * 2.0f32.powf(mid_zeta);
 
                     let wave_length0 = 2.0f32.powf(min_zeta);
                     let wave_number0 = TAU / wave_length0;
 
-                    let wave_length1 = 2.0f32.powf(zeta);
+                    let wave_length1 = 2.0f32.powf(mid_zeta);
                     let wave_number1 = TAU / wave_length1;
 
                     let wave_length2 = 2.0f32.powf(max_zeta);
@@ -278,8 +284,8 @@ pub fn inject_amplitude(
                     ) as usize;
 
                     let spatial_phase =
-                        (wave_number0 * (position_offset + DIRECTIONAL_OFFSETS[theta_index]))
-                        - (dispersion_relation(wave_number0) * water_settings.elapsed_time);
+                        (wave_number1 * profile_coord)
+                        - (dispersion_relation(wave_number1) * water_settings.elapsed_time);
                     let phase_coordinate = spatial_phase;
 
                     // Create amplitude with correct phase
@@ -288,7 +294,7 @@ pub fn inject_amplitude(
 
                     let amplitude = vec2(
                         f32::cos(-phase_coordinate),
-                        f32::cos((-phase_coordinate) + (0.0))
+                        f32::sin(-phase_coordinate)
                     );
 
                     amplitude_out[layer][z][x] = amplitude * debug_settings.scale;
@@ -368,7 +374,7 @@ pub fn build_profile(profile_out: &mut ProfileBuffer, settings: &WaterSettings) 
                 // let zeta = max_zeta;
 
 
-                let period = PERIODICITY * 2.0f32.powf(max_zeta);
+                let period = PERIODICITY * 2.0f32.powf(zeta);
                 let p = (profile_index as f32 * period) / PROFILE_BUFFER_LENGTH as f32;
 
 
@@ -489,11 +495,14 @@ pub fn reconstruct_height(
             // let tz = [0.0f32; 3];
 
             for zeta_index in 0..TOTAL_ZETA_NUMBERS {
-                let max_zeta = MIN_ZETA
-                    + (zeta_full_range * ((zeta_index as f32 + 1.0) / TOTAL_ZETA_NUMBERS as f32));
-                let period = PERIODICITY * 2.0f32.powf(max_zeta);
 
-                for theta_index in 0..DIRECTIONS {
+                let min_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) - 0.0) / (TOTAL_ZETA_NUMBERS as f32)));
+                let max_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) + 1.0) / (TOTAL_ZETA_NUMBERS as f32)));
+                let mid_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.5) / TOTAL_ZETA_NUMBERS as f32));
+                let period = PERIODICITY * 2.0f32.powf(mid_zeta);
+
+                // for theta_index in 0..DIRECTIONS {
+                for theta_index in 0..1{
                     let theta = index_to_radians(theta_index);
                     let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
 
