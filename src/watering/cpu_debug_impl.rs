@@ -12,7 +12,7 @@ use super::{
     MIN_ZETA, MAX_ZETA, GRAVITY,
     WaterSettings, WaterDebugSettings,
 };
-use crate::utils::build_grid_mesh;
+use crate::utils::{build_grid_mesh, sample_bilinear_vec4};
 
 /// Directional offsets for phase coherence (matches water_common.wgsl)
 // const DIRECTIONAL_OFFSETS: [f32; 64] = [
@@ -119,8 +119,13 @@ pub struct CpuDebugWateringResources {
 struct DebugWaterMesh;
 
 const DEBUG_MESH_OFFSET: Vec3 = Vec3::new(0.0, 1.0, 0.0);
-const DEBUG_MESH_CELL_X: f32 = 1.0 / RENDER_X_SIZE as f32;
-const DEBUG_MESH_CELL_Z: f32 = 1.0 / RENDER_Z_SIZE as f32;
+/// How many mesh vertices per height-buffer cell along each axis.
+/// 1 = same resolution as the buffer, 4 = 4× denser per axis (16× vertex count).
+const DEBUG_MESH_UPSAMPLE: usize = 4;
+const DEBUG_MESH_COLS: usize = RENDER_X_SIZE * DEBUG_MESH_UPSAMPLE;
+const DEBUG_MESH_ROWS: usize = RENDER_Z_SIZE * DEBUG_MESH_UPSAMPLE;
+const DEBUG_MESH_CELL_X: f32 = 1.0 / DEBUG_MESH_COLS as f32;
+const DEBUG_MESH_CELL_Z: f32 = 1.0 / DEBUG_MESH_ROWS as f32;
 const DEBUG_MESH_DISP_SCALE: f32 = 1.0 / RENDER_X_SIZE as f32;
 
 pub struct CpuDebugWatering;
@@ -143,8 +148,8 @@ fn init_debug_water_mesh(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let mesh = build_grid_mesh(
-        RENDER_X_SIZE,
-        RENDER_Z_SIZE,
+        DEBUG_MESH_COLS,
+        DEBUG_MESH_ROWS,
         DEBUG_MESH_CELL_X,
         DEBUG_MESH_CELL_Z,
         Vec2::ZERO,
@@ -338,14 +343,21 @@ fn update(
 
     if let Ok(mesh_handle) = debug_mesh_query.single() {
         if let Some(mut mesh) = meshes.get_mut(mesh_handle) {
+            let inv_upsample = 1.0 / DEBUG_MESH_UPSAMPLE as f32;
             if let Some(positions) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
                 if let bevy::mesh::VertexAttributeValues::Float32x3(pos) = positions {
-                    for render_z in 0..RENDER_Z_SIZE {
-                        for render_x in 0..RENDER_X_SIZE {
-                            let surface = cpu_debug_watering_resources.height_buffer[render_z][render_x];
-                            let base_x = render_x as f32 * DEBUG_MESH_CELL_X;
-                            let base_z = render_z as f32 * DEBUG_MESH_CELL_Z;
-                            pos[render_z * RENDER_X_SIZE + render_x] = [
+                    for mesh_row in 0..DEBUG_MESH_ROWS {
+                        for mesh_col in 0..DEBUG_MESH_COLS {
+                            let frac_col = mesh_col as f32 * inv_upsample;
+                            let frac_row = mesh_row as f32 * inv_upsample;
+                            let surface = sample_bilinear_vec4(
+                                &cpu_debug_watering_resources.height_buffer,
+                                frac_col,
+                                frac_row,
+                            );
+                            let base_x = mesh_col as f32 * DEBUG_MESH_CELL_X;
+                            let base_z = mesh_row as f32 * DEBUG_MESH_CELL_Z;
+                            pos[mesh_row * DEBUG_MESH_COLS + mesh_col] = [
                                 base_x + surface.x * DEBUG_MESH_DISP_SCALE,
                                 surface.y * DEBUG_MESH_DISP_SCALE,
                                 base_z + surface.z * DEBUG_MESH_DISP_SCALE,
@@ -356,10 +368,17 @@ fn update(
             }
             if let Some(normal_attr) = mesh.attribute_mut(Mesh::ATTRIBUTE_NORMAL) {
                 if let bevy::mesh::VertexAttributeValues::Float32x3(mesh_normals) = normal_attr {
-                    for render_z in 0..RENDER_Z_SIZE {
-                        for render_x in 0..RENDER_X_SIZE {
-                            let n = cpu_debug_watering_resources.normal_buffer[render_z][render_x];
-                            mesh_normals[render_z * RENDER_X_SIZE + render_x] = [n.x, n.y, n.z];
+                    for mesh_row in 0..DEBUG_MESH_ROWS {
+                        for mesh_col in 0..DEBUG_MESH_COLS {
+                            let frac_col = mesh_col as f32 * inv_upsample;
+                            let frac_row = mesh_row as f32 * inv_upsample;
+                            let n = sample_bilinear_vec4(
+                                &cpu_debug_watering_resources.normal_buffer,
+                                frac_col,
+                                frac_row,
+                            );
+                            let n3 = bevy::math::vec3(n.x, n.y, n.z).normalize_or_zero();
+                            mesh_normals[mesh_row * DEBUG_MESH_COLS + mesh_col] = [n3.x, n3.y, n3.z];
                         }
                     }
                 }
@@ -744,10 +763,10 @@ pub fn reconstruct_height(
                 let temp_surface_offset = surface_offset-temp_surface_offset;
                 if let Some(ref mut gizmos) = gizmos {
                     let pos = vec3(render_x as f32/RENDER_X_SIZE as f32, (-0.05*(zeta_index as f32+1.0)), render_z as f32/RENDER_Z_SIZE as f32) + offset;
-                    gizmos.line(pos,
-                        pos+(temp_surface_offset/(RENDER_X_SIZE as f32 * 1.0)),
-                        Color::srgba(1.0, render_x as f32/RENDER_X_SIZE as f32, render_z as f32/RENDER_Z_SIZE as f32, 1.0),
-                    );
+                    // gizmos.line(pos,
+                    //     pos+(temp_surface_offset/(RENDER_X_SIZE as f32 * 1.0)),
+                    //     Color::srgba(1.0, render_x as f32/RENDER_X_SIZE as f32, render_z as f32/RENDER_Z_SIZE as f32, 1.0),
+                    // );
                 }
             }
 

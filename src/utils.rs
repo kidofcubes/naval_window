@@ -1,4 +1,4 @@
-use bevy::math::{Vec2, Vec3};
+use bevy::math::{Vec2, Vec3, Vec4};
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::prelude::default;
 
@@ -59,6 +59,26 @@ pub fn sample_bilinear(grid: &Vec<Vec<f32>>, fractional_col: f32, fractional_row
     let v01 = grid[row1][col0];
     let v11 = grid[row1][col1];
 
+    let top = v00 + (v10 - v00) * t_col;
+    let bot = v01 + (v11 - v01) * t_col;
+    top + (bot - top) * t_row
+}
+
+/// Bilinear interpolation into a grid of Vec4 indexed as `grid[row][col]`.
+pub fn sample_bilinear_vec4(grid: &Vec<Vec<Vec4>>, fractional_col: f32, fractional_row: f32) -> Vec4 {
+    let rows = grid.len();
+    let cols = grid[0].len();
+    let col0 = (fractional_col as usize).min(cols - 1);
+    let row0 = (fractional_row as usize).min(rows - 1);
+    let col1 = (col0 + 1).min(cols - 1);
+    let row1 = (row0 + 1).min(rows - 1);
+    let t_col = fractional_col - col0 as f32;
+    let t_row = fractional_row - row0 as f32;
+
+    let v00 = grid[row0][col0];
+    let v10 = grid[row0][col1];
+    let v01 = grid[row1][col0];
+    let v11 = grid[row1][col1];
     let top = v00 + (v10 - v00) * t_col;
     let bot = v01 + (v11 - v01) * t_col;
     top + (bot - top) * t_row
