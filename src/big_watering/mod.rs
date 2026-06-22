@@ -2,11 +2,11 @@ use bevy::app::{App, Plugin, Startup, Update};
 use bevy::light::NotShadowCaster;
 use bevy::math::Vec2;
 use bevy::prelude::*;
-use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_resource::Face;
 use num_complex::Complex32;
 use phastft::planner::Direction;
 use rand::{Rng, RngExt};
+use crate::utils::{build_grid_mesh, sample_bilinear, sample_bilinear_normal};
 
 pub struct BigWatering;
 impl Plugin for BigWatering {
@@ -193,90 +193,6 @@ fn compute_normals_from_spectrum(
     }
 }
 
-/// Bilinear interpolation into an N×N grid of f32.
-fn sample_bilinear(grid: &Vec<Vec<f32>>, fractional_col: f32, fractional_row: f32) -> f32 {
-    let grid_size = grid.len();
-    let col0 = (fractional_col as usize).min(grid_size - 1);
-    let row0 = (fractional_row as usize).min(grid_size - 1);
-    let col1 = (col0 + 1).min(grid_size - 1);
-    let row1 = (row0 + 1).min(grid_size - 1);
-    let t_col = fractional_col - col0 as f32;
-    let t_row = fractional_row - row0 as f32;
-
-    let v00 = grid[row0][col0];
-    let v10 = grid[row0][col1];
-    let v01 = grid[row1][col0];
-    let v11 = grid[row1][col1];
-
-    let top = v00 + (v10 - v00) * t_col;
-    let bot = v01 + (v11 - v01) * t_col;
-    top + (bot - top) * t_row
-}
-
-/// Bilinear interpolation into an N×N grid of Vec3, returns normalized result.
-fn sample_bilinear_normal(grid: &Vec<Vec<Vec3>>, fractional_col: f32, fractional_row: f32) -> Vec3 {
-    let grid_size = grid.len();
-    let col0 = (fractional_col as usize).min(grid_size - 1);
-    let row0 = (fractional_row as usize).min(grid_size - 1);
-    let col1 = (col0 + 1).min(grid_size - 1);
-    let row1 = (row0 + 1).min(grid_size - 1);
-    let t_col = fractional_col - col0 as f32;
-    let t_row = fractional_row - row0 as f32;
-
-    let v00 = grid[row0][col0];
-    let v10 = grid[row0][col1];
-    let v01 = grid[row1][col0];
-    let v11 = grid[row1][col1];
-    let top = v00 + (v10 - v00) * t_col;
-    let bot = v01 + (v11 - v01) * t_col;
-    let result = top + (bot - top) * t_row;
-    result.normalize_or_zero()
-}
-
-fn build_ocean_mesh(grid_size: usize, patch_length: f32, mesh_step: f32) -> Mesh {
-    let vertices_per_side = (grid_size as f32 / mesh_step) as usize;
-    let cell_size = patch_length / grid_size as f32;
-    let origin_offset = -patch_length / 2.0;
-
-    let vertex_count = vertices_per_side * vertices_per_side;
-    let mut positions = Vec::with_capacity(vertex_count);
-    let mut normals = Vec::with_capacity(vertex_count);
-    let mut uvs = Vec::with_capacity(vertex_count);
-
-    for row in 0..vertices_per_side {
-        for col in 0..vertices_per_side {
-            let world_x = origin_offset + col as f32 * mesh_step * cell_size;
-            let world_z = origin_offset + row as f32 * mesh_step * cell_size;
-            positions.push([world_x, 0.0, world_z]);
-            normals.push([0.0, 1.0, 0.0]);
-            uvs.push([col as f32 / vertices_per_side as f32, row as f32 / vertices_per_side as f32]);
-        }
-    }
-
-    let mut indices = Vec::with_capacity((vertices_per_side - 1) * (vertices_per_side - 1) * 6);
-    for row in 0..(vertices_per_side - 1) {
-        for col in 0..(vertices_per_side - 1) {
-            let top_left = (row * vertices_per_side + col) as u32;
-            let top_right = top_left + 1;
-            let bottom_left = top_left + vertices_per_side as u32;
-            let bottom_right = bottom_left + 1;
-            indices.push(top_left);
-            indices.push(bottom_left);
-            indices.push(top_right);
-            indices.push(top_right);
-            indices.push(bottom_left);
-            indices.push(bottom_right);
-        }
-    }
-
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, default());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh
-}
-
 fn init_ocean(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
     let config = OceanConfig::default();
     let grid_size = config.grid_size;
@@ -319,7 +235,15 @@ fn init_ocean(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
     }
 
     // Spawn ocean mesh entity
-    let ocean_mesh = build_ocean_mesh(grid_size, config.patch_length, MESH_STEP);
+    let vertices_per_side = (grid_size as f32 / MESH_STEP) as usize;
+    let cell_size = config.patch_length / grid_size as f32;
+    let ocean_mesh = build_grid_mesh(
+        vertices_per_side,
+        vertices_per_side,
+        MESH_STEP * cell_size,
+        MESH_STEP * cell_size,
+        Vec2::splat(-config.patch_length / 2.0),
+    );
     commands.spawn((
         Mesh3d(meshes.add(ocean_mesh)),
         MeshMaterial3d(materials.add(StandardMaterial {

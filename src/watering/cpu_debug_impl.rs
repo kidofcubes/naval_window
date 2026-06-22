@@ -3,13 +3,16 @@
 
 use std::f32::consts::*;
 use bevy::app::hotpatch::call;
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use bevy::render::render_resource::Face;
 use super::{
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
     MIN_ZETA, MAX_ZETA, GRAVITY,
     WaterSettings, WaterDebugSettings,
 };
+use crate::utils::build_grid_mesh;
 
 /// Directional offsets for phase coherence (matches water_common.wgsl)
 // const DIRECTIONAL_OFFSETS: [f32; 64] = [
@@ -111,6 +114,15 @@ pub struct CpuDebugWateringResources {
     pub normal_buffer: NormalBuffer,
 }
 
+#[derive(Component)]
+#[require(Transform)]
+struct DebugWaterMesh;
+
+const DEBUG_MESH_OFFSET: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+const DEBUG_MESH_CELL_X: f32 = 1.0 / RENDER_X_SIZE as f32;
+const DEBUG_MESH_CELL_Z: f32 = 1.0 / RENDER_Z_SIZE as f32;
+const DEBUG_MESH_DISP_SCALE: f32 = 1.0 / RENDER_X_SIZE as f32;
+
 pub struct CpuDebugWatering;
 impl Plugin for CpuDebugWatering {
     fn build(&self, app: &mut App) {
@@ -120,8 +132,39 @@ impl Plugin for CpuDebugWatering {
             height_buffer: new_height_buffer(),
             normal_buffer: new_normal_buffer(),
         });
+        app.add_systems(Startup, init_debug_water_mesh);
         app.add_systems(Update, update);
     }
+}
+
+fn init_debug_water_mesh(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let mesh = build_grid_mesh(
+        RENDER_X_SIZE,
+        RENDER_Z_SIZE,
+        DEBUG_MESH_CELL_X,
+        DEBUG_MESH_CELL_Z,
+        Vec2::ZERO,
+    );
+    commands.spawn((
+        Mesh3d(meshes.add(mesh)),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.5, 0.5, 0.5),
+            alpha_mode: AlphaMode::Opaque,
+            double_sided: false,
+            cull_mode: Some(Face::Back),
+            perceptual_roughness: 1.0,
+            reflectance: 0.0,
+            metallic: 0.0,
+            ..default()
+        })),
+        NotShadowCaster,
+        Transform::from_translation(DEBUG_MESH_OFFSET),
+        DebugWaterMesh,
+    ));
 }
 
 fn get_offset_for_position(render_pos: Vec2, zeta_index: usize, theta_index: usize, profile: &ProfileBuffer) -> Vec2 {
@@ -174,6 +217,8 @@ fn update(
     mut gizmos: Gizmos,
     time: Res<Time>,
     key: Res<ButtonInput<KeyCode>>,
+    debug_mesh_query: Query<&Mesh3d, With<DebugWaterMesh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
 ){
 
     if(key.pressed(KeyCode::KeyC)) {
@@ -266,7 +311,8 @@ fn update(
 
 
     for x in 0..RENDER_X_SIZE {
-        for z in 0..RENDER_Z_SIZE {
+        // for z in 0..RENDER_Z_SIZE {
+        for z in 0..16 {
             let pos = vec3(x as f32/RENDER_X_SIZE as f32, 0.0, z as f32/RENDER_Z_SIZE as f32) + offset;
             let offset = cpu_debug_watering_resources.height_buffer[z][x];
             let normal = cpu_debug_watering_resources.normal_buffer[z][x];
@@ -286,6 +332,37 @@ fn update(
                     translation: (pos + vec3(0.0, 0.5, 0.0)).into(),
                     ..default()
                 }, &format!("x{} z{} height {} normal {}", x, z, offset, normal), 0.1, Vec2::new(0.5,0.5), Color::srgba_u8(0,255,0,255));
+            }
+        }
+    }
+
+    if let Ok(mesh_handle) = debug_mesh_query.single() {
+        if let Some(mut mesh) = meshes.get_mut(mesh_handle) {
+            if let Some(positions) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+                if let bevy::mesh::VertexAttributeValues::Float32x3(pos) = positions {
+                    for render_z in 0..RENDER_Z_SIZE {
+                        for render_x in 0..RENDER_X_SIZE {
+                            let surface = cpu_debug_watering_resources.height_buffer[render_z][render_x];
+                            let base_x = render_x as f32 * DEBUG_MESH_CELL_X;
+                            let base_z = render_z as f32 * DEBUG_MESH_CELL_Z;
+                            pos[render_z * RENDER_X_SIZE + render_x] = [
+                                base_x + surface.x * DEBUG_MESH_DISP_SCALE,
+                                surface.y * DEBUG_MESH_DISP_SCALE,
+                                base_z + surface.z * DEBUG_MESH_DISP_SCALE,
+                            ];
+                        }
+                    }
+                }
+            }
+            if let Some(normal_attr) = mesh.attribute_mut(Mesh::ATTRIBUTE_NORMAL) {
+                if let bevy::mesh::VertexAttributeValues::Float32x3(mesh_normals) = normal_attr {
+                    for render_z in 0..RENDER_Z_SIZE {
+                        for render_x in 0..RENDER_X_SIZE {
+                            let n = cpu_debug_watering_resources.normal_buffer[render_z][render_x];
+                            mesh_normals[render_z * RENDER_X_SIZE + render_x] = [n.x, n.y, n.z];
+                        }
+                    }
+                }
             }
         }
     }

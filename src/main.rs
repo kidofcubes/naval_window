@@ -4,6 +4,7 @@ mod voxelize;
 mod watering;
 mod mesh_optimize;
 mod big_watering;
+mod utils;
 
 use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, window::WindowResolution};
 use std::{env, path::{Path, PathBuf}};
