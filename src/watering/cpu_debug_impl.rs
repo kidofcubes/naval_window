@@ -10,7 +10,7 @@ use super::{
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
     MIN_ZETA, MAX_ZETA, GRAVITY,
-    WaterSettings, WaterDebugSettings,
+    WaterSettings, WaterDebugSettings, WaterWaveGroupSpeeds,
 };
 use crate::utils::{build_grid_mesh, sample_bilinear_vec4};
 
@@ -224,22 +224,27 @@ fn update(
     key: Res<ButtonInput<KeyCode>>,
     debug_mesh_query: Query<&Mesh3d, With<DebugWaterMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    wave_group_speeds: Res<WaterWaveGroupSpeeds>,
 ){
 
     if(key.pressed(KeyCode::KeyC)) {
 
     }
-    // if(key.pressed(KeyCode::KeyH)) {
+    if(key.pressed(KeyCode::KeyH)) {
         water_debug_settings.inject = 1.0;
+    }else{
+        water_debug_settings.inject = -1.0;
+    }
         let cpu_debug_watering_resources = cpu_debug_watering_resources.as_mut();
 
-        let delta_time = time.delta_secs() * 3.0;
+        let delta_time = time.delta_secs() * 1.0;
         // water_settings.elapsed_time = 100.0;
-        water_settings.elapsed_time = (water_debug_settings.spawn_center_z * 0.01) + 100.0;
+        // water_settings.elapsed_time = (water_debug_settings.spawn_center_z * 0.01) + 100.0;
         // water_settings.elapsed_time = (time.elapsed_secs() * 3.0) + 100.0;
         // water_settings.elapsed_time = 0.0;
 
         call(|| build_profile(&mut cpu_debug_watering_resources.profile_buffer, &water_settings));
+        call(|| advect_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &wave_group_speeds, delta_time));
         call(|| inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &water_settings, &water_debug_settings));
         call(|| reconstruct_height(&cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &mut cpu_debug_watering_resources.height_buffer, &mut cpu_debug_watering_resources.normal_buffer, &water_settings, Some(&mut gizmos)));
         // inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &water_settings, &water_debug_settings);
@@ -389,6 +394,73 @@ fn update(
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// WATER ADVECTION (semi-Lagrangian, mirrors water_advection.wgsl, no reflection)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Bilinear sample of the amplitude buffer at fractional grid coords (x, z).
+/// Mirrors the shader's `sample_amplitude`: returns zero outside the valid band.
+fn sample_amplitude_bilinear(
+    buf: &AmplitudeBuffer,
+    x: f32,
+    z: f32,
+    theta_index: usize,
+    zeta_index: usize,
+) -> Vec2 {
+    if x < 1.0 || x >= (GRID_X_SIZE - 1) as f32 || z < 1.0 || z >= (GRID_Z_SIZE - 1) as f32 {
+        return Vec2::ZERO;
+    }
+    let layer = layer_index(theta_index, zeta_index);
+    let x0 = x.floor() as usize;
+    let z0 = z.floor() as usize;
+    let x1 = x0 + 1;
+    let z1 = z0 + 1;
+    let fx = x - x0 as f32;
+    let fz = z - z0 as f32;
+
+    let v00 = buf[layer][z0][x0];
+    let v10 = buf[layer][z0][x1];
+    let v01 = buf[layer][z1][x0];
+    let v11 = buf[layer][z1][x1];
+    let top = v00 * (1.0 - fx) + v10 * fx;
+    let bot = v01 * (1.0 - fx) + v11 * fx;
+    top * (1.0 - fz) + bot * fz
+}
+
+/// CPU port of the semi-Lagrangian advection compute shader (reflection skipped).
+/// For each (theta, zeta, x, z) we trace back along the group velocity by
+/// `delta_time` and resample the amplitude at the previous position.
+pub fn advect_amplitude(
+    amplitude_io: &mut AmplitudeBuffer,
+    wave_group_speeds: &WaterWaveGroupSpeeds,
+    delta_time: f32,
+) {
+    // Read from a frozen snapshot so each cell sees last frame's state.
+    let prev = amplitude_io.clone();
+
+    for theta_index in 0..DIRECTIONS {
+        let theta = index_to_radians(theta_index);
+        let cos_theta = f32::cos(theta);
+        let sin_theta = f32::sin(theta);
+
+        for zeta_index in 0..TOTAL_ZETA_NUMBERS {
+            let layer = layer_index(theta_index, zeta_index);
+            let group_speed = wave_group_speeds.wave_group_speeds[zeta_index].x;
+            let dx = cos_theta * group_speed * delta_time;
+            let dz = sin_theta * group_speed * delta_time;
+
+            for z in 0..GRID_Z_SIZE {
+                for x in 0..GRID_X_SIZE {
+                    let prev_x = x as f32 - dx;
+                    let prev_z = z as f32 - dz;
+                    amplitude_io[layer][z][x] =
+                        sample_amplitude_bilinear(&prev, prev_x, prev_z, theta_index, zeta_index);
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // WATER INJECTION
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -426,9 +498,9 @@ pub fn inject_amplitude(
             .sqrt();
 
             // Skip if outside injection radius
-            // if dist > debug_settings.radius {
-            //     continue;
-            // }
+            if dist > debug_settings.radius {
+                continue;
+            }
 
             for theta_index in 0..DIRECTIONS {
             // for theta_index in 0..1{
@@ -489,9 +561,9 @@ pub fn inject_amplitude(
                     }
 
                     let amplitude = vec2(
-                        f32::cos((-phase_coordinate)+(debug_settings.spawn_center_x*0.01)),
+                        f32::cos((-phase_coordinate)+(debug_settings.spawn_center_x*0.00)),
                         // f32::cos((-0.0)+(debug_settings.spawn_center_x*0.01)),
-                        f32::sin((-phase_coordinate)+(debug_settings.spawn_center_x*0.01))
+                        f32::sin((-phase_coordinate)+(debug_settings.spawn_center_x*0.00))
                         // f32::sin((-0.0)+(debug_settings.spawn_center_x*0.01))
                     );
 
