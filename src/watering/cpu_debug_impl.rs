@@ -430,8 +430,8 @@ pub fn inject_amplitude(
             //     continue;
             // }
 
-            // for theta_index in 0..DIRECTIONS {
-            for theta_index in 0..1{
+            for theta_index in 0..DIRECTIONS {
+            // for theta_index in 0..1{
                 // let theta_index = 0;
                 let theta = index_to_radians(theta_index);
                 let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
@@ -721,8 +721,8 @@ pub fn reconstruct_height(
                 let period = PERIODICITY * 2.0f32.powf(mid_zeta);
                 let temp_surface_offset = surface_offset;
 
-                // for theta_index in 0..DIRECTIONS {
-                for theta_index in 0..1{
+                for theta_index in 0..DIRECTIONS {
+                // for theta_index in 0..1{
                     let theta = index_to_radians(theta_index);
                     let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
 
@@ -746,19 +746,19 @@ pub fn reconstruct_height(
                     // Height contribution: Re(A) * cos - Im(A) * sin
                     surface_offset.y += (amplitude.x * cos_val.y) - (amplitude.y * -cos_val.x);
 
-                    surface_offset.x += dir.x * ((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
-                    surface_offset.z += dir.y * ((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
-                    tx += dir.x * vec3(
-                        ((amplitude.x * cos_val.z) - (amplitude.y * cos_val.w)),
-                        ((amplitude.x * cos_val.w) - (amplitude.y * cos_val.z)),
-                        0.0
-                    );
+                    let horiz_disp = (amplitude.x * cos_val.x) - (amplitude.y * cos_val.y);
+                    surface_offset.x += dir.x * horiz_disp;
+                    surface_offset.z += dir.z * horiz_disp;
 
-                    tz += dir.y * vec3(
-                        0.0,
-                        ((amplitude.x * cos_val.w) - (amplitude.y * cos_val.z)),
-                        ((amplitude.x * cos_val.z) - (amplitude.y * cos_val.w))
-                    );
+                    // Displacement derivatives w.r.t. the wave parameter p.
+                    let dh_dp = (amplitude.x * cos_val.z) - (amplitude.y * cos_val.w);
+                    let dv_dp = (amplitude.x * cos_val.w) - (amplitude.y * cos_val.z);
+
+                    // d(world)/dx with dp/dx = dir.x (excluding the +X identity term;
+                    // we add that once after the zeta loop).
+                    tx += vec3(dir.x * dir.x * dh_dp, dir.x * dv_dp, dir.x * dir.z * dh_dp);
+                    // d(world)/dz with dp/dz = dir.z (excluding the +Z identity term).
+                    tz += vec3(dir.x * dir.z * dh_dp, dir.z * dv_dp, dir.z * dir.z * dh_dp);
                 }
                 let temp_surface_offset = surface_offset-temp_surface_offset;
                 if let Some(ref mut gizmos) = gizmos {
@@ -779,15 +779,10 @@ pub fn reconstruct_height(
                 }
             }
 
-            // Compute normal from tangent vectors
-            if(tx.length()==0.0){
-                tx = vec3(1.0, 0.0, 0.0);
-            }
-            if(tz.length()==0.0){
-                tz = vec3(0.0, 0.0, 1.0);
-            }
-            let normal = Vec3::cross(tx, tz);
-            let normal = Vec3::normalize(normal);
+            // Add the grid identity term (the base, undisplaced surface).
+            tx += Vec3::X;
+            tz += Vec3::Z;
+            let normal = Vec3::cross(tz, tx).normalize();
             // let normal_len = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
             // let normal = if normal_len > 0.0 {
             //     [normal[0] / normal_len, normal[1] / normal_len, normal[2] / normal_len]
