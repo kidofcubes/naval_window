@@ -178,19 +178,19 @@ fn debug_input_system(
 
     // WASD moves spawn center
     if key.pressed(KeyCode::KeyA) {
-        debug_settings.spawn_center_x -= 1.0;
+        debug_settings.spawn_center_x -= (if key.pressed(KeyCode::ShiftLeft) {10.0}else{1.0}) * 1.0;
         println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
     }
     if key.pressed(KeyCode::KeyD) {
-        debug_settings.spawn_center_x += 1.0;
+        debug_settings.spawn_center_x += (if key.pressed(KeyCode::ShiftLeft) {10.0}else{1.0}) * 1.0;
         println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
     }
     if key.pressed(KeyCode::KeyS) {
-        debug_settings.spawn_center_z -= 1.0;
+        debug_settings.spawn_center_z -= (if key.pressed(KeyCode::ShiftLeft) {10.0}else{1.0}) * 1.0;
         println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
     }
     if key.pressed(KeyCode::KeyW) {
-        debug_settings.spawn_center_z += 1.0;
+        debug_settings.spawn_center_z += (if key.pressed(KeyCode::ShiftLeft) {10.0}else{1.0}) * 1.0;
         println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
     }
 }

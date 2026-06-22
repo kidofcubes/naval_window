@@ -80,7 +80,8 @@ use super::{
 // ];
 const DIRECTIONAL_OFFSETS: [f32; 64] = [0.0; 64];
 
-const INTEGRATION_STEPS: usize = 1;
+// because of some stuff, higher values of this make smaller profile
+const INTEGRATION_STEPS: usize = 64;
 const PERIODICITY: f32 = 2.0;
 
 /// Convert direction index to radians
@@ -123,6 +124,92 @@ impl Plugin for CpuDebugWatering {
     }
 }
 
+fn get_offset_for_position(render_pos: Vec2, zeta_index: usize, theta_index: usize, elapsed_time: f32) -> Vec2 {
+    let grid_pos = vec2(
+        render_pos.x * (RENDER_X_SIZE as f32 / GRID_X_SIZE as f32),
+        render_pos.y * (RENDER_Z_SIZE as f32 / GRID_Z_SIZE as f32)
+    );
+    let theta = index_to_radians(theta_index);
+    let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
+
+    let zeta_full_range = MAX_ZETA - MIN_ZETA;
+    let wind_speed = 3.0; // Hardcoded in shader
+
+    let min_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.0) / TOTAL_ZETA_NUMBERS as f32));
+    let max_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 1.0) / TOTAL_ZETA_NUMBERS as f32));
+    let mid_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.5) / TOTAL_ZETA_NUMBERS as f32));
+
+    let period = PERIODICITY * 2.0f32.powf(mid_zeta);
+
+
+
+    // Position offset along wave direction
+    let position_offset = grid_pos.dot(vec2(dir.x,dir.z));
+
+    // Profile buffer index (wrapping)
+    let profile_coord = position_offset + DIRECTIONAL_OFFSETS[theta_index];
+    let index = modulo(
+        PROFILE_BUFFER_LENGTH as f32 * (profile_coord / period),
+        PROFILE_BUFFER_LENGTH as f32,
+    ) as usize;
+    let index = index.min(PROFILE_BUFFER_LENGTH - 1);
+
+    let profile_index = index;
+    let mut profile_value = Vec4::ZERO;
+
+    for i in 0..INTEGRATION_STEPS {
+        let zeta =
+            min_zeta + ((max_zeta - min_zeta) * ((i as f32 + 0.5) / INTEGRATION_STEPS as f32));
+        // let zeta = max_zeta;
+
+
+        let period = PERIODICITY * 2.0f32.powf(mid_zeta);
+        // let period = PERIODICITY * 2.0f32.powf(zeta);
+        let p = (profile_index as f32 * period) / PROFILE_BUFFER_LENGTH as f32;
+
+
+        let wave_length = 2.0f32.powf(zeta);
+        let wave_number = TAU / wave_length;
+
+        let phase1 = (wave_number * (p         )) - (dispersion_relation(wave_number) * elapsed_time);
+        let phase2 = (wave_number * (p - period)) - (dispersion_relation(wave_number) * elapsed_time);
+
+        let weight1 = p / period;
+        let weight2 = 1.0 - weight1;
+
+
+        profile_value += wave_length * spectrum(zeta, wind_speed) * (
+            // (gerstner_wave(phase1, wave_number))
+            (cubic_bump(weight1) * gerstner_wave(phase1, wave_number))
+                + (cubic_bump(weight2) * gerstner_wave(phase2, wave_number))
+        );
+
+        // result += wave_length * spectrum(zeta, wind_speed) * (
+        //     (gerstner_wave(phase1, wave_number))
+        //         + (gerstner_wave(phase2, wave_number))
+        // );
+
+        // result += wave_length * spectrum(zeta, wind_speed) * (
+        //     gerstner_wave(phase1, wave_number)
+        // );
+
+        // result += spec * (
+        //     (cubic_bump(weight1) * gerstner1)
+        //     + (cubic_bump(weight2) * gerstner2)
+        // );
+    }
+
+    let mut offset: Vec2 = Vec2::ZERO;
+    let amplitude = vec2(1.0,0.0);
+    let cos_val = profile_value;
+
+    offset.y += (amplitude.x * cos_val.y) - (amplitude.y * -cos_val.x); //vertical
+
+    offset.x += (amplitude.x * cos_val.x) - (amplitude.y *  cos_val.y); //horizontal
+
+    return offset;
+}
+
 fn update(
     mut cpu_debug_watering_resources: ResMut<CpuDebugWateringResources>,
     mut water_debug_settings: ResMut<WaterDebugSettings>,
@@ -131,6 +218,10 @@ fn update(
     time: Res<Time>,
     key: Res<ButtonInput<KeyCode>>,
 ){
+
+    if(key.pressed(KeyCode::KeyC)) {
+
+    }
     // if(key.pressed(KeyCode::KeyH)) {
         water_debug_settings.inject = 1.0;
         let cpu_debug_watering_resources = cpu_debug_watering_resources.as_mut();
@@ -143,7 +234,7 @@ fn update(
 
         call(|| inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &water_settings, &water_debug_settings));
         call(|| build_profile(&mut cpu_debug_watering_resources.profile_buffer, &water_settings));
-        call(|| reconstruct_height(&cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &mut cpu_debug_watering_resources.height_buffer, &mut cpu_debug_watering_resources.normal_buffer, &water_settings));
+        call(|| reconstruct_height(&cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &mut cpu_debug_watering_resources.height_buffer, &mut cpu_debug_watering_resources.normal_buffer, &water_settings, Some(&mut gizmos)));
         // inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &water_settings, &water_debug_settings);
         // build_profile(&mut cpu_debug_watering_resources.profile_buffer, &water_settings);
         // reconstruct_height(&cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &mut cpu_debug_watering_resources.height_buffer, &mut cpu_debug_watering_resources.normal_buffer, &water_settings);
@@ -195,10 +286,32 @@ fn update(
     }
 
     let offset = vec3(-0.0, 1.0, 0.0);
+    gizmos.text(Isometry3d {
+        translation: (offset + vec3(0.0, 1.0, 0.0)).into(),
+        ..default()
+    }, &format!("x0 z0"), 0.1, Vec2::new(0.5,0.5), Color::srgba_u8(0,255,0,255));
+
+    gizmos.text(Isometry3d {
+        translation: (offset + vec3(1.0, 1.0, 0.0)).into(),
+        ..default()
+    }, &format!("x1 z0"), 0.1, Vec2::new(0.5,0.5), Color::srgba_u8(0,255,0,255));
+
+    gizmos.text(Isometry3d {
+        translation: (offset + vec3(0.0, 1.0, 1.0)).into(),
+        ..default()
+    }, &format!("x0 z1"), 0.1, Vec2::new(0.5,0.5), Color::srgba_u8(0,255,0,255));
+
+    gizmos.text(Isometry3d {
+        translation: (offset + vec3(1.0, 1.0, 1.0)).into(),
+        ..default()
+    }, &format!("x1 z1"), 0.1, Vec2::new(0.5,0.5), Color::srgba_u8(0,255,0,255));
+
+
+
     for x in 0..RENDER_X_SIZE {
         for z in 0..RENDER_Z_SIZE {
             let pos = vec3(x as f32/RENDER_X_SIZE as f32, 0.0, z as f32/RENDER_Z_SIZE as f32) + offset;
-            let num = cpu_debug_watering_resources.height_buffer[x][z];
+            let num = cpu_debug_watering_resources.height_buffer[z][x];
             gizmos.line(
                 pos,
                 pos + (vec3(num[0], num[1], num[2])/(RENDER_X_SIZE as f32 * 1.0)),
@@ -286,15 +399,33 @@ pub fn inject_amplitude(
                     let spatial_phase =
                         (wave_number1 * profile_coord)
                         - (dispersion_relation(wave_number1) * water_settings.elapsed_time);
-                    let phase_coordinate = spatial_phase;
+                    let mut phase_coordinate = spatial_phase;
 
                     // Create amplitude with correct phase
                     // Note: shader stores (scale, 0.0) - simplified version
                     let layer = layer_index(theta_index, zeta_index);
+                    let mut best_index = index;
+
+                    // for i in (PROFILE_BUFFER_LENGTH as i32)/-8..(PROFILE_BUFFER_LENGTH as i32)/8 {
+                    //     let shifted_index = modulo(index+i as f32,PROFILE_BUFFER_LENGTH as f32) as usize;
+                    //     let shifted_index = shifted_index.min(PROFILE_BUFFER_LENGTH - 1);
+                    // }
+                    if debug_settings.radius > 0.0 {
+                        phase_coordinate = 0.0;
+                        let render_pos = vec2(
+                            (pos_x / GRID_X_SIZE as f32) * RENDER_X_SIZE as f32,
+                            (pos_z / GRID_Z_SIZE as f32) * RENDER_Z_SIZE as f32,
+                        );
+                        let orig_offset = get_offset_for_position(render_pos, zeta_index, theta_index, water_settings.elapsed_time);
+                        let orig_angle = f32::atan2(orig_offset.y, orig_offset.x);
+                        phase_coordinate = orig_angle - PI/2.0;
+                    }
 
                     let amplitude = vec2(
-                        f32::cos(-phase_coordinate),
-                        f32::sin(-phase_coordinate)
+                        f32::cos((-phase_coordinate)+(debug_settings.spawn_center_x*0.01)),
+                        // f32::cos((-0.0)+(debug_settings.spawn_center_x*0.01)),
+                        f32::sin((-phase_coordinate)+(debug_settings.spawn_center_x*0.01))
+                        // f32::sin((-0.0)+(debug_settings.spawn_center_x*0.01))
                     );
 
                     amplitude_out[layer][z][x] = amplitude * debug_settings.scale;
@@ -358,15 +489,14 @@ pub fn build_profile(profile_out: &mut ProfileBuffer, settings: &WaterSettings) 
     let wind_speed = 3.0; // Hardcoded in shader
 
     for zeta_index in 0..TOTAL_ZETA_NUMBERS {
-        let min_zeta =
-            MIN_ZETA + (zeta_full_range * (zeta_index as f32 / TOTAL_ZETA_NUMBERS as f32));
-        let max_zeta =
-            MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 1.0) / TOTAL_ZETA_NUMBERS as f32));
-
-        let dx = (max_zeta - min_zeta) / INTEGRATION_STEPS as f32;
+        let min_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.0) / TOTAL_ZETA_NUMBERS as f32));
+        let max_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 1.0) / TOTAL_ZETA_NUMBERS as f32));
+        let mid_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.5) / TOTAL_ZETA_NUMBERS as f32));
 
         for profile_index in 0..PROFILE_BUFFER_LENGTH {
             let mut result = Vec4::ZERO;
+
+            let dx = (max_zeta - min_zeta) / INTEGRATION_STEPS as f32;
 
             for i in 0..INTEGRATION_STEPS {
                 let zeta =
@@ -374,7 +504,8 @@ pub fn build_profile(profile_out: &mut ProfileBuffer, settings: &WaterSettings) 
                 // let zeta = max_zeta;
 
 
-                let period = PERIODICITY * 2.0f32.powf(zeta);
+                let period = PERIODICITY * 2.0f32.powf(mid_zeta);
+                // let period = PERIODICITY * 2.0f32.powf(zeta);
                 let p = (profile_index as f32 * period) / PROFILE_BUFFER_LENGTH as f32;
 
 
@@ -389,6 +520,7 @@ pub fn build_profile(profile_out: &mut ProfileBuffer, settings: &WaterSettings) 
 
 
                 result += wave_length * spectrum(zeta, wind_speed) * (
+                    // (gerstner_wave(phase1, wave_number))
                       (cubic_bump(weight1) * gerstner_wave(phase1, wave_number))
                     + (cubic_bump(weight2) * gerstner_wave(phase2, wave_number))
                 );
@@ -407,6 +539,8 @@ pub fn build_profile(profile_out: &mut ProfileBuffer, settings: &WaterSettings) 
                 //     + (cubic_bump(weight2) * gerstner2)
                 // );
             }
+            // result /= INTEGRATION_STEPS as f32;
+            // result *= (max_zeta-min_zeta);
             result *= dx;
 
             profile_out[zeta_index][profile_index] = result;
@@ -480,9 +614,27 @@ pub fn reconstruct_height(
     height_out: &mut HeightBuffer,
     normal_out: &mut NormalBuffer,
     _settings: &WaterSettings,
+    mut gizmos: Option<&mut Gizmos>,
 ) {
     let zeta_full_range = MAX_ZETA - MIN_ZETA;
     let direction_multiplier = 1.0 / DIRECTIONS as f32;
+    let offset = vec3(-0.0, 1.0, 0.0);
+
+    if let Some(ref mut gizmos) = gizmos {
+        for zeta_index in 0..TOTAL_ZETA_NUMBERS {
+            let min_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) - 0.0) / (TOTAL_ZETA_NUMBERS as f32)));
+            let max_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) + 1.0) / (TOTAL_ZETA_NUMBERS as f32)));
+            let mid_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.5) / TOTAL_ZETA_NUMBERS as f32));
+            let pos = vec3(0.0, (-0.05 * (zeta_index as f32 + 1.0)), 0.0) + offset;
+            let period = PERIODICITY * 2.0f32.powf(mid_zeta);
+            let wave_length = 2.0f32.powf(mid_zeta);
+
+            gizmos.text(Isometry3d {
+                translation: pos.into(),
+                ..default()
+            }, &format!("index {:?} wave_length {:?} zeta {:?}", zeta_index, wave_length, mid_zeta), 0.01, Vec2::new(0.5,0.5), Color::srgba_u8(0,255,0,255));
+        }
+    }
 
     for render_z in 0..RENDER_Z_SIZE {
         for render_x in 0..RENDER_X_SIZE {
@@ -500,6 +652,7 @@ pub fn reconstruct_height(
                 let max_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) + 1.0) / (TOTAL_ZETA_NUMBERS as f32)));
                 let mid_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.5) / TOTAL_ZETA_NUMBERS as f32));
                 let period = PERIODICITY * 2.0f32.powf(mid_zeta);
+                let temp_surface_offset = surface_offset;
 
                 // for theta_index in 0..DIRECTIONS {
                 for theta_index in 0..1{
@@ -529,6 +682,14 @@ pub fn reconstruct_height(
                     surface_offset.x += dir.x * ((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
                     surface_offset.z += dir.y * ((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
                 }
+                let temp_surface_offset = surface_offset-temp_surface_offset;
+                if let Some(ref mut gizmos) = gizmos {
+                    let pos = vec3(render_x as f32/RENDER_X_SIZE as f32, (-0.05*(zeta_index as f32+1.0)), render_z as f32/RENDER_Z_SIZE as f32) + offset;
+                    gizmos.line(pos,
+                        pos+(temp_surface_offset/(RENDER_X_SIZE as f32 * 1.0)),
+                        Color::srgba(1.0, render_x as f32/RENDER_X_SIZE as f32, render_z as f32/RENDER_Z_SIZE as f32, 1.0),
+                    );
+                }
             }
 
             // Compute normal from tangent vectors
@@ -540,7 +701,7 @@ pub fn reconstruct_height(
             //     [0.0, 1.0, 0.0]
             // };
 
-            height_out[render_z][render_x] = Vec4::new(surface_offset[0], surface_offset[1], surface_offset[2], 1.0);
+            height_out[render_z][render_x] = Vec4::new(surface_offset.x, surface_offset.y, surface_offset.z, 1.0);
             // normal_out[render_z][render_x] = [normal[0], normal[1], normal[2], 1.0];
         }
     }
@@ -597,6 +758,7 @@ impl CpuWaterSimulation {
             &mut self.height,
             &mut self.normal,
             settings,
+            None,
         );
     }
 
