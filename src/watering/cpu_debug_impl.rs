@@ -268,12 +268,25 @@ fn update(
     for x in 0..RENDER_X_SIZE {
         for z in 0..RENDER_Z_SIZE {
             let pos = vec3(x as f32/RENDER_X_SIZE as f32, 0.0, z as f32/RENDER_Z_SIZE as f32) + offset;
-            let num = cpu_debug_watering_resources.height_buffer[z][x];
+            let offset = cpu_debug_watering_resources.height_buffer[z][x];
+            let normal = cpu_debug_watering_resources.normal_buffer[z][x];
             gizmos.line(
                 pos,
-                pos + (vec3(num[0], num[1], num[2])/(RENDER_X_SIZE as f32 * 1.0)),
+                pos + (offset.xyz() /(RENDER_X_SIZE as f32 * 1.0)),
                 Color::srgba(1.0, x as f32/RENDER_X_SIZE as f32, z as f32/RENDER_Z_SIZE as f32, 1.0),
-            )
+            );
+
+            gizmos.line(
+                pos,
+                pos + (normal.xyz()*0.01),
+                Color::srgba(x as f32/RENDER_X_SIZE as f32, 1.0, z as f32/RENDER_Z_SIZE as f32, 1.0),
+            );
+            if(x==0&&z==0){
+                gizmos.text(Isometry3d {
+                    translation: (pos + vec3(0.0, 0.5, 0.0)).into(),
+                    ..default()
+                }, &format!("x{} z{} height {} normal {}", x, z, offset, normal), 0.1, Vec2::new(0.5,0.5), Color::srgba_u8(0,255,0,255));
+            }
         }
     }
 }
@@ -601,8 +614,8 @@ pub fn reconstruct_height(
             let real_z = (render_z as f32 / RENDER_Z_SIZE as f32) * GRID_Z_SIZE as f32;
 
             let mut surface_offset = Vec3::ZERO;
-            // let tx = [0.0f32; 3];
-            // let tz = [0.0f32; 3];
+            let mut tx = Vec3::ZERO;
+            let mut tz = Vec3::ZERO;
 
             for zeta_index in 0..TOTAL_ZETA_NUMBERS {
 
@@ -632,13 +645,24 @@ pub fn reconstruct_height(
                     let index = index.min(PROFILE_BUFFER_LENGTH - 1);
 
                     // Load profile values (scaled by direction multiplier)
-                    let cos_val = profile_in[zeta_index][index] * direction_multiplier;
+                    let cos_val: Vec4 = profile_in[zeta_index][index] * direction_multiplier;
 
                     // Height contribution: Re(A) * cos - Im(A) * sin
                     surface_offset.y += (amplitude.x * cos_val.y) - (amplitude.y * -cos_val.x);
 
                     surface_offset.x += dir.x * ((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
                     surface_offset.z += dir.y * ((amplitude.x * cos_val.x) - (amplitude.y * cos_val.y));
+                    tx += dir.x * vec3(
+                        ((amplitude.x * cos_val.z) - (amplitude.y * cos_val.w)),
+                        ((amplitude.x * cos_val.w) - (amplitude.y * cos_val.z)),
+                        0.0
+                    );
+
+                    tz += dir.y * vec3(
+                        0.0,
+                        ((amplitude.x * cos_val.w) - (amplitude.y * cos_val.z)),
+                        ((amplitude.x * cos_val.z) - (amplitude.y * cos_val.w))
+                    );
                 }
                 let temp_surface_offset = surface_offset-temp_surface_offset;
                 if let Some(ref mut gizmos) = gizmos {
@@ -650,8 +674,24 @@ pub fn reconstruct_height(
                 }
             }
 
+            if let Some(ref mut gizmos) = gizmos {
+                if(render_x==0&&render_z==0){
+                    gizmos.text(Isometry3d {
+                        translation: (offset + vec3(0.0, 1.0, 0.0)).into(),
+                        ..default()
+                    }, &format!("{:?} x {:?}", tx, tz), 0.01, Vec2::new(0.5,0.5), Color::srgba_u8(255,0,0,255));
+                }
+            }
+
             // Compute normal from tangent vectors
-            // let normal = cross(&tx, &tz);
+            if(tx.length()==0.0){
+                tx = vec3(1.0, 0.0, 0.0);
+            }
+            if(tz.length()==0.0){
+                tz = vec3(0.0, 0.0, 1.0);
+            }
+            let normal = Vec3::cross(tx, tz);
+            let normal = Vec3::normalize(normal);
             // let normal_len = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
             // let normal = if normal_len > 0.0 {
             //     [normal[0] / normal_len, normal[1] / normal_len, normal[2] / normal_len]
@@ -660,19 +700,10 @@ pub fn reconstruct_height(
             // };
 
             height_out[render_z][render_x] = Vec4::new(surface_offset.x, surface_offset.y, surface_offset.z, 1.0);
+            normal_out[render_z][render_x] = Vec4::new(normal.x, normal.y, normal.z, 1.0);
             // normal_out[render_z][render_x] = [normal[0], normal[1], normal[2], 1.0];
         }
     }
-}
-
-/// Cross product of two 3D vectors
-#[inline]
-fn cross(a: &[f32; 3], b: &[f32; 3]) -> [f32; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
