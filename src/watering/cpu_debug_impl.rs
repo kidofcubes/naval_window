@@ -124,7 +124,7 @@ impl Plugin for CpuDebugWatering {
     }
 }
 
-fn get_offset_for_position(render_pos: Vec2, zeta_index: usize, theta_index: usize, elapsed_time: f32) -> Vec2 {
+fn get_offset_for_position(render_pos: Vec2, zeta_index: usize, theta_index: usize, profile: &ProfileBuffer) -> Vec2 {
     let grid_pos = vec2(
         render_pos.x * (RENDER_X_SIZE as f32 / GRID_X_SIZE as f32),
         render_pos.y * (RENDER_Z_SIZE as f32 / GRID_Z_SIZE as f32)
@@ -154,50 +154,7 @@ fn get_offset_for_position(render_pos: Vec2, zeta_index: usize, theta_index: usi
     ) as usize;
     let index = index.min(PROFILE_BUFFER_LENGTH - 1);
 
-    let profile_index = index;
-    let mut profile_value = Vec4::ZERO;
-
-    for i in 0..INTEGRATION_STEPS {
-        let zeta =
-            min_zeta + ((max_zeta - min_zeta) * ((i as f32 + 0.5) / INTEGRATION_STEPS as f32));
-        // let zeta = max_zeta;
-
-
-        let period = PERIODICITY * 2.0f32.powf(mid_zeta);
-        // let period = PERIODICITY * 2.0f32.powf(zeta);
-        let p = (profile_index as f32 * period) / PROFILE_BUFFER_LENGTH as f32;
-
-
-        let wave_length = 2.0f32.powf(zeta);
-        let wave_number = TAU / wave_length;
-
-        let phase1 = (wave_number * (p         )) - (dispersion_relation(wave_number) * elapsed_time);
-        let phase2 = (wave_number * (p - period)) - (dispersion_relation(wave_number) * elapsed_time);
-
-        let weight1 = p / period;
-        let weight2 = 1.0 - weight1;
-
-
-        profile_value += wave_length * spectrum(zeta, wind_speed) * (
-            // (gerstner_wave(phase1, wave_number))
-            (cubic_bump(weight1) * gerstner_wave(phase1, wave_number))
-                + (cubic_bump(weight2) * gerstner_wave(phase2, wave_number))
-        );
-
-        // result += wave_length * spectrum(zeta, wind_speed) * (
-        //     (gerstner_wave(phase1, wave_number))
-        //         + (gerstner_wave(phase2, wave_number))
-        // );
-
-        // result += wave_length * spectrum(zeta, wind_speed) * (
-        //     gerstner_wave(phase1, wave_number)
-        // );
-
-        // result += spec * (
-        //     (cubic_bump(weight1) * gerstner1)
-        //     + (cubic_bump(weight2) * gerstner2)
-        // );
-    }
+    let mut profile_value = profile[zeta_index][index];
 
     let mut offset: Vec2 = Vec2::ZERO;
     let amplitude = vec2(1.0,0.0);
@@ -232,8 +189,8 @@ fn update(
         // water_settings.elapsed_time = (time.elapsed_secs() * 3.0) + 100.0;
         // water_settings.elapsed_time = 0.0;
 
-        call(|| inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &water_settings, &water_debug_settings));
         call(|| build_profile(&mut cpu_debug_watering_resources.profile_buffer, &water_settings));
+        call(|| inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &water_settings, &water_debug_settings));
         call(|| reconstruct_height(&cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &mut cpu_debug_watering_resources.height_buffer, &mut cpu_debug_watering_resources.normal_buffer, &water_settings, Some(&mut gizmos)));
         // inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &water_settings, &water_debug_settings);
         // build_profile(&mut cpu_debug_watering_resources.profile_buffer, &water_settings);
@@ -340,6 +297,7 @@ pub fn new_amplitude_buffer() -> AmplitudeBuffer {
 /// Injects phase-coherent waves in a circular region for debugging.
 pub fn inject_amplitude(
     amplitude_out: &mut AmplitudeBuffer,
+    profile_in: &ProfileBuffer,
     water_settings: &WaterSettings,
     debug_settings: &WaterDebugSettings,
 ) {
@@ -416,7 +374,7 @@ pub fn inject_amplitude(
                             (pos_x / GRID_X_SIZE as f32) * RENDER_X_SIZE as f32,
                             (pos_z / GRID_Z_SIZE as f32) * RENDER_Z_SIZE as f32,
                         );
-                        let orig_offset = get_offset_for_position(render_pos, zeta_index, theta_index, water_settings.elapsed_time);
+                        let orig_offset = get_offset_for_position(render_pos, zeta_index, theta_index, profile_in);
                         let orig_angle = f32::atan2(orig_offset.y, orig_offset.x);
                         phase_coordinate = orig_angle - PI/2.0;
                     }
@@ -742,7 +700,7 @@ impl CpuWaterSimulation {
 
     /// Run the water injection pass
     pub fn inject(&mut self, settings: &WaterSettings, debug_settings: &WaterDebugSettings) {
-        inject_amplitude(&mut self.amplitude, settings, debug_settings);
+        inject_amplitude(&mut self.amplitude, &self.profile, settings, debug_settings);
     }
 
     /// Run the profile generation pass
