@@ -52,7 +52,7 @@ impl Plugin for Watering{
         // .add_systems(Update, (tick_water_time, sync_ship_position))
         ;
 
-        if(false) {
+        if(true) {
             app
                 .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterDebugSettings>::default())
@@ -157,40 +157,41 @@ fn debug_input_system(
 ) {
     // H key injects amplitude this frame
     debug_settings.inject = if key.pressed(KeyCode::KeyH) { 1.0 } else { 0.0 };
+    let multiplier = (if key.pressed(KeyCode::ShiftLeft) {10.0}else{1.0});
 
     // Arrow keys adjust scale and radius
     if key.pressed(KeyCode::ArrowUp) {
-        debug_settings.scale += 0.5;
+        debug_settings.scale += multiplier * 0.5;
         println!("scale {}", debug_settings.scale);
     }
     if key.pressed(KeyCode::ArrowDown) {
-        debug_settings.scale -= 0.5;
+        debug_settings.scale -= multiplier * 0.5;
         println!("scale {}", debug_settings.scale);
     }
     if key.pressed(KeyCode::ArrowRight) {
-        debug_settings.radius += 0.5;
+        debug_settings.radius += multiplier * 0.5;
         println!("radius {}", debug_settings.radius);
     }
     if key.pressed(KeyCode::ArrowLeft) {
-        debug_settings.radius -= 0.5;
+        debug_settings.radius -= multiplier * 0.5;
         println!("radius {}", debug_settings.radius);
     }
 
     // WASD moves spawn center
     if key.pressed(KeyCode::KeyA) {
-        debug_settings.spawn_center_x -= (if key.pressed(KeyCode::ShiftLeft) {10.0}else{1.0}) * 1.0;
+        debug_settings.spawn_center_x -= multiplier * 1.0;
         println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
     }
     if key.pressed(KeyCode::KeyD) {
-        debug_settings.spawn_center_x += (if key.pressed(KeyCode::ShiftLeft) {10.0}else{1.0}) * 1.0;
+        debug_settings.spawn_center_x += multiplier * 1.0;
         println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
     }
     if key.pressed(KeyCode::KeyS) {
-        debug_settings.spawn_center_z -= (if key.pressed(KeyCode::ShiftLeft) {10.0}else{1.0}) * 1.0;
+        debug_settings.spawn_center_z -= multiplier * 1.0;
         println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
     }
     if key.pressed(KeyCode::KeyW) {
-        debug_settings.spawn_center_z += (if key.pressed(KeyCode::ShiftLeft) {10.0}else{1.0}) * 1.0;
+        debug_settings.spawn_center_z += multiplier * 1.0;
         println!("spawn_center {:?},{:?}", debug_settings.spawn_center_x,debug_settings.spawn_center_z);
     }
 }
@@ -202,14 +203,14 @@ fn debug_input_system(
 // pub const GRID_X_SIZE: usize = 256;
 // pub const GRID_Z_SIZE: usize = 256;
 
-// pub const GRID_X_SIZE: usize = 256;
-// pub const GRID_Z_SIZE: usize = 256;
-pub const GRID_X_SIZE: usize = 64;
-pub const GRID_Z_SIZE: usize = 64;
+pub const GRID_X_SIZE: usize = 256;
+pub const GRID_Z_SIZE: usize = 256;
+// pub const GRID_X_SIZE: usize = 64;
+// pub const GRID_Z_SIZE: usize = 64;
 pub const GRID_SCALE: f32 = 1.0; //how many meters each grid cell represents
 
 // pub const DIRECTIONS: usize = 1;
-pub const DIRECTIONS: usize = 32;
+pub const DIRECTIONS: usize = 16;
 // pub const TOTAL_ZETA_NUMBERS: usize = 1;
 pub const TOTAL_ZETA_NUMBERS: usize = 4;
 pub const MIN_ZETA: f32 = -5.0;
@@ -218,12 +219,12 @@ pub const MAX_ZETA: f32 = 3.3;
 pub const WIND_SPEED: f32 = 3.0;
 const GRAVITY: f32 = 9.81;
 
-// pub const RENDER_X_SIZE: usize = 256;
-// pub const RENDER_Z_SIZE: usize = 256;
+pub const RENDER_X_SIZE: usize = 256;
+pub const RENDER_Z_SIZE: usize = 256;
 // pub const RENDER_X_SIZE: usize = 2048;
 // pub const RENDER_Z_SIZE: usize = 2048;
-pub const RENDER_X_SIZE: usize = 64;
-pub const RENDER_Z_SIZE: usize = 64;
+// pub const RENDER_X_SIZE: usize = 64;
+// pub const RENDER_Z_SIZE: usize = 64;
 
 
 pub const PROFILE_BUFFER_LENGTH: usize = 512;

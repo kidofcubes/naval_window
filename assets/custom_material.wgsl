@@ -120,7 +120,8 @@ fn calculate_water_offset(uv: vec2<f32>) -> vec3<f32> {
     for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
         let min_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) - 0.0) / f32(TOTAL_ZETA_NUMBERS)));
         let max_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 1.0) / f32(TOTAL_ZETA_NUMBERS)));
-        let period: f32 = f32(PERIODICITY) * pow(2,max_zeta);
+        let mid_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 0.5) / f32(TOTAL_ZETA_NUMBERS)));
+        let period: f32 = f32(PERIODICITY) * pow(2,mid_zeta);
 
         for (var theta_index: u32 = 0u; theta_index < DIRECTIONS; theta_index++) {
             let theta = index_to_radians(theta_index);

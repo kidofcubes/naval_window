@@ -457,9 +457,9 @@ fn main() {
         .add_plugins((
             // WebAssetPlugin,
             default_plugins,
-            // NavalSketchPlugin{
-            //     init_paths: data_paths.unwrap(),
-            // },
+            NavalSketchPlugin{
+                init_paths: data_paths.unwrap(),
+            },
             WireframePlugin::default(),
             WaterPlugin,
             CameraMovementPlugin,

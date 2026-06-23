@@ -51,9 +51,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         let min_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) - 0.0) / f32(TOTAL_ZETA_NUMBERS)));
         let max_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 1.0) / f32(TOTAL_ZETA_NUMBERS)));
-            let period: f32 = f32(PERIODICITY) * pow(2,max_zeta);
+        let mid_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 0.5) / f32(TOTAL_ZETA_NUMBERS)));
+        let period: f32 = f32(PERIODICITY) * pow(2,mid_zeta);
 
-            let p = (f32(profile_index) * period) / f32(PROFILE_BUFFER_LENGTH);
+        let p = (f32(profile_index) * period) / f32(PROFILE_BUFFER_LENGTH);
 
         let dx = (max_zeta - min_zeta) / f32(INTEGRATION_STEPS);
 

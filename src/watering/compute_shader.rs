@@ -62,10 +62,10 @@ pub fn render_pass(
     let wg_profile = profile_workgroups();
 
     let passes_to_run = [
-        (ComputePasses::WaterInject, wg_grid),
+        (ComputePasses::WaterProfile, wg_profile),
         (ComputePasses::WaterAdvection, wg_grid),
         (ComputePasses::WaterDiffusion, wg_grid),
-        (ComputePasses::WaterProfile, wg_profile),
+        (ComputePasses::WaterInject, wg_grid),
     ];
 
     // Resolve all pipelines + bind groups; bail if any aren't ready.
@@ -147,10 +147,16 @@ impl FromWorld for WaterPipelines {
         let asset_server  = world.resource::<AssetServer>();
         let pipeline_cache = world.resource::<PipelineCache>();
 
+        compute_pipeline!(passes, ComputePasses::WaterProfile, asset_server, pipeline_cache, (
+            texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::WriteOnly),
+            uniform_buffer::<WaterSettings>(false),
+        ));
+
         compute_pipeline!(passes, ComputePasses::WaterInject, asset_server, pipeline_cache, (
             texture_storage_2d_array(TextureFormat::R32Float, StorageTextureAccess::ReadWrite),
             uniform_buffer::<WaterSettings>(false),
             uniform_buffer::<WaterDebugSettings>(false),
+            texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::ReadOnly),
         ));
 
         compute_pipeline!(passes, ComputePasses::WaterAdvection, asset_server, pipeline_cache, (
@@ -172,10 +178,6 @@ impl FromWorld for WaterPipelines {
             uniform_buffer::<WaterWaveGroupSpeeds>(false),
         ));
 
-        compute_pipeline!(passes, ComputePasses::WaterProfile, asset_server, pipeline_cache, (
-            texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::WriteOnly),
-            uniform_buffer::<WaterSettings>(false),
-        ));
 
         Self { passes }
     }
@@ -273,9 +275,10 @@ pub fn queue_bind_groups(
         "inject_bg",
         &pipeline_cache.get_bind_group_layout(layout_for(ComputePasses::WaterInject)),
         &BindGroupEntries::sequential((
-            amp_read,
+            amp_write,
             settings_buf.as_entire_binding(),
             debug_settings_buf.as_entire_binding(),
+            &profile.texture_view,
         )),
     ));
 
