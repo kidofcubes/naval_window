@@ -245,6 +245,7 @@ fn update(
 
         call(|| build_profile(&mut cpu_debug_watering_resources.profile_buffer, &water_settings));
         call(|| advect_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &wave_group_speeds, delta_time));
+        call(|| diffuse_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &wave_group_speeds, delta_time));
         call(|| inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &water_settings, &water_debug_settings));
         call(|| reconstruct_height(&cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &mut cpu_debug_watering_resources.height_buffer, &mut cpu_debug_watering_resources.normal_buffer, &water_settings, Some(&mut gizmos)));
         // inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &water_settings, &water_debug_settings);
@@ -454,6 +455,52 @@ pub fn advect_amplitude(
                     let prev_z = z as f32 - dz;
                     amplitude_io[layer][z][x] =
                         sample_amplitude_bilinear(&prev, prev_x, prev_z, theta_index, zeta_index);
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WATER DIFFUSION (directional diffusion, mirrors water_diffusion.wgsl)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Wrap a possibly-negative direction index into `[0, DIRECTIONS)`.
+#[inline]
+fn wrap_direction(d: i32) -> usize {
+    let n = DIRECTIONS as i32;
+    (((d % n) + n) % n) as usize
+}
+
+/// CPU port of the directional diffusion compute shader.
+/// Spreads each cell's amplitude toward its two angular neighbours by an
+/// amount proportional to the wave group speed and `delta_time`.
+pub fn diffuse_amplitude(
+    amplitude_io: &mut AmplitudeBuffer,
+    wave_group_speeds: &WaterWaveGroupSpeeds,
+    delta_time: f32,
+) {
+    let prev = amplitude_io.clone();
+
+    for theta_index in 0..DIRECTIONS {
+        let theta_m1 = wrap_direction(theta_index as i32 - 1);
+        let theta_p1 = wrap_direction(theta_index as i32 + 1);
+
+        for zeta_index in 0..TOTAL_ZETA_NUMBERS {
+            let layer = layer_index(theta_index, zeta_index);
+            let layer_m1 = layer_index(theta_m1, zeta_index);
+            let layer_p1 = layer_index(theta_p1, zeta_index);
+
+            let group_speed = wave_group_speeds.wave_group_speeds[zeta_index].x;
+            let gamma = 2.0 * 0.025 * group_speed * delta_time * 0.5;
+
+            for z in 0..GRID_Z_SIZE {
+                for x in 0..GRID_X_SIZE {
+                    let amp_m1 = prev[layer_m1][z][x];
+                    let amp_0 = prev[layer][z][x];
+                    let amp_p1 = prev[layer_p1][z][x];
+                    amplitude_io[layer][z][x] =
+                        amp_0 * (1.0 - gamma) + (amp_m1 + amp_p1) * (gamma * 0.5);
                 }
             }
         }
