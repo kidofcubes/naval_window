@@ -125,37 +125,37 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let prev_z = f32(z) - dz;
 
         // SDF-based reflection check
-//        let prev_voxel_pos = grid_to_voxel(f32(prev_x), f32(prev_z));
-//        let voxel_pos = grid_to_voxel(f32(x), f32(z));
-//        let sdf_val = sample_sdf(prev_voxel_pos);
+        let prev_voxel_pos = grid_to_voxel(f32(prev_x), f32(prev_z));
+        let voxel_pos = grid_to_voxel(f32(x), f32(z));
+        let sdf_val = sample_sdf(prev_voxel_pos);
         var new_amplitude: f32;
 
-//        if (sdf_val <= 1.0) {
-        if (false) {
+        if (sdf_val <= 1.0) {
+//        if (false) {
             // Near or inside boundary — reflect using SDF gradient
 //            let normal_3d = sdf_normal(prev_voxel_pos);
-//            let normal_3d = sdf_normal(voxel_pos);
-//            // Project to XZ plane for 2D wave reflection
-//            let n_xz = normalize(vec2<f32>(normal_3d.x, normal_3d.z) + vec2<f32>(0.0000001, 0.0));
+            let normal_3d = sdf_normal(voxel_pos);
+            // Project to XZ plane for 2D wave reflection
+            let n_xz = normalize(vec2<f32>(normal_3d.x, normal_3d.z) + vec2<f32>(0.0000001, 0.0));
+
+            // Current wave direction in 2D
+            let d = vec2<f32>(cos(theta), sin(theta));
+
+            // Reflect: d_reflected = d - 2*dot(d, n)*n
+            let d_reflected = d - 2.0 * dot(d, n_xz) * n_xz;
+
+            // Find closest discrete theta index for reflected direction
+            let reflected_index = direction_to_theta_index(d_reflected);
+            let theta_r = index_to_radians(reflected_index);
+
+            // Trace back from reflected direction
+            let drx = cos(theta_r) * group_speed * settings.delta_time;
+            let drz = sin(theta_r) * group_speed * settings.delta_time;
+            let prev_r_x = f32(x) - drx;
+            let prev_r_z = f32(z) - drz;
 //
-//            // Current wave direction in 2D
-//            let d = vec2<f32>(cos(theta), sin(theta));
-//
-//            // Reflect: d_reflected = d - 2*dot(d, n)*n
-//            let d_reflected = d - 2.0 * dot(d, n_xz) * n_xz;
-//
-//            // Find closest discrete theta index for reflected direction
-//            let reflected_index = direction_to_theta_index(d_reflected);
-//            let theta_r = index_to_radians(reflected_index);
-//
-//            // Trace back from reflected direction
-//            let drx = cos(theta_r) * group_speed * settings.delta_time;
-//            let drz = sin(theta_r) * group_speed * settings.delta_time;
-//            let prev_r_x = f32(x) - drx;
-//            let prev_r_z = f32(z) - drz;
-//
-//            let reflected_amp = sample_amplitude(prev_r_x, prev_r_z, reflected_index, zeta_index);
-//            new_amplitude = reflected_amp * 0.9; // damping factor
+            let reflected_amp = sample_amplitude(prev_r_x, prev_r_z, reflected_index, zeta_index);
+            new_amplitude = reflected_amp * 0.9; // damping factor
 //            new_amplitude = 0.0;
         } else {
             // Normal advection - sample previous amplitude at current direction

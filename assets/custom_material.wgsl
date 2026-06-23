@@ -63,29 +63,13 @@ fn modulo_f32(x: f32, n: f32) -> f32{
     return x - floor(x / n) * n;
 }
 
-// Hardware bilinear sample from amplitude texture array
-fn sample_amplitude(x: f32, z: f32, theta_index: u32, zeta_index: u32) -> f32 {
-    // Convert to normalized UV coordinates (0-1)
-    // Add 0.5 to sample at texel centers
-
-    //when x is 512.0 and z is 512.0, we should end up sampling from the middle of pixel 512,512
-
+// Hardware bilinear sample from amplitude texture array.
+// Returns (real, imag) — GPU storage is r32float so .y is currently always 0,
+// but we read both so the formula matches the CPU port verbatim.
+fn sample_amplitude(x: f32, z: f32, theta_index: u32, zeta_index: u32) -> vec2<f32> {
     let uv = vec2<f32>((x + 0.5) / f32(GRID_X_SIZE), (z + 0.5) / f32(GRID_Z_SIZE));
     let layer = layer_index(theta_index, zeta_index);
-
-    //will be 0.0 from 511.5 to 512.5 in index coordinates (true 0.5 around the center)
-//    if (i32(round(x))==512||i32(round(z))==512){
-//        return 0.0;
-//    }
-
-//    if (i32(x)==511||i32(z)==511){
-//        return 0.0;
-//    }
-
-    return textureSampleLevel(amplitude_texture, amplitude_sampler, uv, layer, 0.0).x;
-
-    //when x is 512 and z is 512, should be
-//    return textureLoad(amplitude_texture, vec2<i32>(i32(floor(x)),i32(floor(z))), layer, 0).x;
+    return textureSampleLevel(amplitude_texture, amplitude_sampler, uv, layer, 0.0).xy;
 }
 
 fn sample_profile(x: f32, z: f32, theta_index: u32, zeta_index: u32, period: f32, dir: vec2<f32>) -> vec4<f32>{
@@ -101,117 +85,74 @@ fn sample_profile(x: f32, z: f32, theta_index: u32, zeta_index: u32, period: f32
     return textureLoad(profile_buffer, vec2<i32>(index, i32(zeta_index)), 0);
 }
 
-// Calculate water surface offset at a given world position
-fn calculate_water_offset(uv: vec2<f32>) -> vec3<f32> {
+// Combined surface reconstruction: returns the world-space displacement of
+// this UV column AND the surface normal in one pass, mirroring the CPU
+// `reconstruct_height` function in cpu_debug_impl.rs.
+struct WaterSurface {
+    offset: vec3<f32>,
+    normal: vec3<f32>,
+}
+
+fn calculate_water_surface(uv: vec2<f32>) -> WaterSurface {
+    var result: WaterSurface;
+    result.offset = vec3<f32>(0.0, 0.0, 0.0);
+    result.normal = vec3<f32>(0.0, 1.0, 0.0);
+
     if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0){
-        return vec3<f32>(0.0,0.0,0.0);
+        return result;
     }
+
     // Map UV coordinates to grid coordinates
     let real_x = uv.x * f32(GRID_X_SIZE);
     let real_z = uv.y * f32(GRID_Z_SIZE);
 
     var surface_offset = vec3<f32>(0.0, 0.0, 0.0);
-//    var tx = vec3<f32>(0.0, 0.0, 0.0);
-//    var tz = vec3<f32>(0.0, 0.0, 0.0);
-
-    let direction_multiplier = 1.0/f32(DIRECTIONS);
-    let zeta_full_range = ZETA_MAX - ZETA_MIN;
-
-    for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
-        let min_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) - 0.0) / f32(TOTAL_ZETA_NUMBERS)));
-        let max_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 1.0) / f32(TOTAL_ZETA_NUMBERS)));
-        let mid_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 0.5) / f32(TOTAL_ZETA_NUMBERS)));
-        let period: f32 = f32(PERIODICITY) * pow(2,mid_zeta);
-
-        for (var theta_index: u32 = 0u; theta_index < DIRECTIONS; theta_index++) {
-            let theta = index_to_radians(theta_index);
-            let dir = vec3<f32>(cos(theta), 0.0, sin(theta));
-
-            // Sample amplitude at this position and direction
-            let amplitude = sample_amplitude(real_x, real_z, theta_index, zeta_index);
-
-            let profile = sample_profile(real_x, real_z, theta_index, zeta_index, period, vec2<f32>(dir.x,dir.z)) * direction_multiplier;
-
-            // Height contribution
-            surface_offset.y += (amplitude * profile.y);
-            surface_offset.x += dir.x * (amplitude * profile.x);
-            surface_offset.z += dir.z * (amplitude * profile.x);
-        }
-    }
-//    return vec3<f32>(0.0,sample_amplitude(real_x,real_z,0,0),0.0);
-
-    return surface_offset / GRID_SCALE;
-}
-
-//// Calculate water normal at a given world position using finite differences
-//fn calculate_water_normal(world_pos: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
-//    let epsilon = 0.1; // Small offset for finite difference
-//
-//    // Sample height at neighboring points
-//    let center = calculate_water_offset(world_pos.x, world_pos.z, uv);
-//    let right = calculate_water_offset(uv + vec2(epsilon/400.0, 0.0));
-//    let up = calculate_water_offset(world_pos.x, world_pos.z + epsilon, uv + vec2(0.0, epsilon/400.0));
-//
-//    // Calculate tangent vectors
-//    let tangent_x = vec3(epsilon, right.y - center.y, 0.0);
-//    let tangent_z = vec3(0.0, up.y - center.y, epsilon);
-//
-//    // Cross product gives normal
-//    let normal = normalize(cross(tangent_x, tangent_z));
-//
-//    return normal;
-//}
-
-fn compute_normal(uv: vec2<f32>) -> vec3<f32> {
-//    return vec3<f32>(0.0,1.0,0.0);
-    if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0){
-        return vec3<f32>(0.0,1.0,0.0);
-    }
-    // Map UV coordinates to grid coordinates
-    let real_x = uv.x * f32(GRID_X_SIZE);
-    let real_z = uv.y * f32(GRID_Z_SIZE);
-
-//    var grad = vec2<f32>(0.0, 0.0);
     var tx = vec3<f32>(0.0, 0.0, 0.0);
     var tz = vec3<f32>(0.0, 0.0, 0.0);
 
-    var dhdx = 0.0;
-    var dhdz = 0.0;
-
+    let direction_multiplier = 1.0 / f32(DIRECTIONS);
     let zeta_full_range = ZETA_MAX - ZETA_MIN;
+
     for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
-        let min_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) - 0.0) / f32(TOTAL_ZETA_NUMBERS)));
-        let max_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 1.0) / f32(TOTAL_ZETA_NUMBERS)));
-        let period: f32 = f32(PERIODICITY) * pow(2,max_zeta);
-        let k        = (2.0 * 3.14159265) / period;  // wavenumber for this band
+        let mid_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 0.5) / f32(TOTAL_ZETA_NUMBERS)));
+        let period: f32 = f32(PERIODICITY) * pow(2.0, mid_zeta);
 
         for (var theta_index: u32 = 0u; theta_index < DIRECTIONS; theta_index++) {
             let theta = index_to_radians(theta_index);
             let dir = vec3<f32>(cos(theta), 0.0, sin(theta));
 
-            let amplitude = sample_amplitude(real_x,real_z, theta_index, zeta_index);
+            // amplitude = (real, imag) — see sample_amplitude
+            let amplitude = sample_amplitude(real_x, real_z, theta_index, zeta_index);
 
-            let profile = sample_profile(real_x, real_z, theta_index, zeta_index, period, vec2<f32>(dir.x,dir.z));
-            tx += dir.x * vec3<f32>(
-                amplitude * profile.z,
-                amplitude * profile.w,
-                0.0
-            );
-            tz += dir.z * vec3<f32>(
-                0.0,
-                amplitude * profile.w,
-                amplitude * profile.z
-            );
-            dhdx += amplitude * profile.w * k * dir.x;
-            dhdz += amplitude * profile.w * k * dir.z;
+            // Profile lookup, scaled by 1/DIRECTIONS so per-direction contributions sum to 1.
+            let cos_val = sample_profile(real_x, real_z, theta_index, zeta_index, period, vec2<f32>(dir.x, dir.z)) * direction_multiplier;
+
+            // ── displacement ────────────────────────────────────────────────
+            // Height contribution: Re(A) * cos - Im(A) * (-sin)
+            surface_offset.y += (amplitude.x * cos_val.y) - (amplitude.y * -cos_val.x);
+
+            let horiz_disp = (amplitude.x * cos_val.x) - (amplitude.y * cos_val.y);
+            surface_offset.x += dir.x * horiz_disp;
+            surface_offset.z += dir.z * horiz_disp;
+
+            // ── tangent derivatives w.r.t. wave parameter p ─────────────────
+            let dh_dp = (amplitude.x * cos_val.z) - (amplitude.y * cos_val.w);
+            let dv_dp = (amplitude.x * cos_val.w) - (amplitude.y * cos_val.z);
+
+            // d(world)/dx with dp/dx = dir.x (identity +X added after the loop)
+            tx += vec3<f32>(dir.x * dir.x * dh_dp, dir.x * dv_dp, dir.x * dir.z * dh_dp);
+            // d(world)/dz with dp/dz = dir.z (identity +Z added after the loop)
+            tz += vec3<f32>(dir.x * dir.z * dh_dp, dir.z * dv_dp, dir.z * dir.z * dh_dp);
         }
     }
-    if((tx.x == 0.0 && tx.y == 0.0 && tx.z == 0.0)||(tz.x == 0.0 && tz.y == 0.0 && tz.z == 0.0)){
-        return vec3<f32>(0.0,1.0,0.0);
-    }
-    var n = normalize(cross(tz,tx));
-    return select(-n, n, n.y > 0.0);
-//    return normalize(vec3<f32>(-dhdx, 1.0, -dhdz));
+
+    // Add the grid identity term (undisplaced surface tangents).
+    tx += vec3<f32>(1.0, 0.0, 0.0);
+    tz += vec3<f32>(0.0, 0.0, 1.0);
+
+    result.offset = surface_offset / GRID_SCALE;
+    result.normal = normalize(cross(tz, tx));
+    return result;
 }
 
 
@@ -266,7 +207,7 @@ fn translate_vertex(vertex: Vertex) -> VertexOutput {
     var y_offset = 100.0;
 
     // Calculate water displacement using UV coordinates
-    var offset: vec3<f32> = calculate_water_offset(uv_from_world(orig_world_position.xyz)) * 1.0;
+    var offset: vec3<f32> = calculate_water_surface(uv_from_world(orig_world_position.xyz)).offset * 1.0;
 //    offset = vec3<f32>(0.0,0.0,0.0);
 
     let position = vec4<f32>(vertex.position + offset,1.0) + vec4<f32>(0.0,y_offset,0.0,0.0);
@@ -302,7 +243,7 @@ fn fragment(
     var pbr_input = pbr_input_from_standard_material(in, is_front);
 //    pbr_input.material.base_color.b = 255;
 //#ifdef NORMAL_PREPASS
-    var world_normal = compute_normal(uv_from_world(in.world_position.xyz));
+    var world_normal = calculate_water_surface(uv_from_world(in.world_position.xyz)).normal;
 //    pbr_input.material.base_color.r = world_normal.x;
 //    pbr_input.material.base_color.g = world_normal.y;
 //    pbr_input.material.base_color.b = world_normal.z;
