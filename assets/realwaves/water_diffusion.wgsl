@@ -23,7 +23,7 @@ fn sample_amplitude(x: u32, z: u32, theta_index: u32, wave_index: u32) -> f32 {
 //    }
     let uv = vec2<f32>((f32(x) + 0.5) / f32(GRID_X_SIZE), (f32(z) + 0.5) / f32(GRID_Z_SIZE));
     let layer = layer_index(theta_index, wave_index);
-    return textureSampleLevel(amplitude_in, amplitude_sampler, uv, layer, 0.0).x;
+    return length(textureSampleLevel(amplitude_in, amplitude_sampler, uv, layer, 0.0).xy);
 }
 
 fn wrap_direction(d: i32) -> u32 {
@@ -59,7 +59,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let amp_p1 = sample_amplitude(x, z, theta_p1, zeta_index);
 
         // Weighted average of magnitudes
-        let new_amplitude = (1.0 - gamma) * amp_0 + gamma * 0.5 * (amp_m1 + amp_p1);
+        let new_amplitude = (1.0 - gamma) * amp_0 + (gamma * 0.5 * (amp_m1 + amp_p1));
 //        let new_amplitude = amp_0;
 
         // Write to output

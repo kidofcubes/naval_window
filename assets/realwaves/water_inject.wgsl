@@ -25,14 +25,10 @@ fn modulo(x: f32, n: f32) -> f32 {
 // Mirrors cpu_debug_impl::get_offset_for_position.
 // Returns vec2(horizontal_disp, vertical_height) from the profile lookup.
 fn get_offset_for_position(
-    render_pos: vec2<f32>,
+    grid_pos: vec2<f32>,
     zeta_index: u32,
     theta_index: u32,
 ) -> vec2<f32> {
-    let grid_pos = vec2<f32>(
-        render_pos.x * (f32(RENDER_X_SIZE) / f32(GRID_X_SIZE)),
-        render_pos.y * (f32(RENDER_Z_SIZE) / f32(GRID_Z_SIZE)),
-    );
     let theta = index_to_radians(theta_index);
     let dir = vec3<f32>(cos(theta), 0.0, sin(theta));
 
@@ -50,8 +46,16 @@ fn get_offset_for_position(
     let index = min(u32(raw_index), PROFILE_BUFFER_LENGTH - 1u);
 
     let profile_value = textureLoad(profile_in, vec2<i32>(i32(index), i32(zeta_index)));
-    // amplitude = (1, 0), so offset = (profile.x, profile.y)
-    return vec2<f32>(profile_value.x, profile_value.y);
+
+    var offset = vec2<f32>(0.0, 0.0);
+    let amplitude = vec2(1.0,0.0);
+    let cos_val = profile_value;
+
+    offset.y += (amplitude.x * cos_val.y) - (amplitude.y * -cos_val.x); //vertical
+
+    offset.x += (amplitude.x * cos_val.x) - (amplitude.y *  cos_val.y); //horizontal
+
+    return offset;
 }
 
 @compute @workgroup_size(32, 32, 1)
@@ -107,21 +111,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // profile coord from height reconstruction
         let profile_coord = position_offset + DIRECTIONAL_OFFSETS[theta_index];
 
-        let spatial_phase =
-            (wave_number1 * profile_coord)
-          - (sqrt(GRAVITY * wave_number1) * settings.elapsed_time);
-        var phase_coordinate = spatial_phase;
+//        let spatial_phase =
+//            (wave_number1 * profile_coord)
+//          - (sqrt(GRAVITY * wave_number1) * settings.elapsed_time);
+//        var phase_coordinate = spatial_phase;
 
-        if (debug_settings.radius > 0.0) {
-            let render_pos = vec2<f32>(
-                (pos_x / f32(GRID_X_SIZE)) * f32(RENDER_X_SIZE),
-                (pos_z / f32(GRID_Z_SIZE)) * f32(RENDER_Z_SIZE),
-            );
-            let orig_offset = get_offset_for_position(render_pos, zeta_index, theta_index);
+        let raw_index = modulo(
+            f32(PROFILE_BUFFER_LENGTH) * (profile_coord / period),
+            f32(PROFILE_BUFFER_LENGTH),
+        );
+        let index = min(u32(raw_index), PROFILE_BUFFER_LENGTH - 1u);
+
+//        if (debug_settings.radius > 0.0) {
+            let orig_offset = get_offset_for_position(vec2(pos_x,pos_z), zeta_index, theta_index);
             let orig_angle = atan2(orig_offset.y, orig_offset.x);
-            phase_coordinate = orig_angle - PI / 2.0;
+            let phase_coordinate = orig_angle - PI / 2.0;
 //            phase_coordinate = 0.0;
-        }
+//        }
 
         // amplitude = (cos(-phase), sin(-phase)) * scale
         // r32float storage can only hold the real (cos) component.
@@ -136,15 +142,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if(length(orig_amplitude)==0.000){
             normalized_amplitude = vec2<f32>(1.0, 0.0);
         }
-//        let relax_constant = 1.0/(600.0 * (min_zeta / mid_zeta));
-        let relax_constant = 1.0;
+        let relax_constant = 1.0/(600.0 * (min_zeta / mid_zeta));
+//        let relax_constant = 1.0;
 //        let relax_constant = 600000.0;
         let orig_length = length(orig_amplitude);
 //        amplitude = orig_amplitude + vec2(1.0,0.0);
         let difference = ((pre_computed_wave_data.jonswap_spectrum_amplitudes[layer].x) - orig_length);
 //        let difference = 0.0;
-        amplitude = orig_amplitude + (normalized_amplitude * max(0.0, difference * relax_constant));
-//        amplitude = (normalized_amplitude * pre_computed_wave_data.jonswap_spectrum_amplitudes[layer].x);
+//        amplitude = orig_amplitude + (normalized_amplitude * max(0.0, difference * relax_constant));
+        amplitude = (normalized_amplitude * pre_computed_wave_data.jonswap_spectrum_amplitudes[layer].x);
 //        amplitude = orig_amplitude + (normalized_amplitude * max(0.0, (10.0 - orig_length) / relax_constant));
 //        amplitude = orig_amplitude + (normalized_amplitude * 0.0000000000000001);
 //        amplitude = vec2(10.0,0.0);

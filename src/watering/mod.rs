@@ -103,11 +103,11 @@ pub fn setup_textures(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
 ){
-    let render_size = Extent3d {
-        width: RENDER_X_SIZE as u32,
-        height: RENDER_Z_SIZE as u32,
-        depth_or_array_layers: 1,
-    };
+    // let render_size = Extent3d {
+    //     width: RENDER_X_SIZE as u32,
+    //     height: RENDER_Z_SIZE as u32,
+    //     depth_or_array_layers: 1,
+    // };
     let amplitude_size = Extent3d {
         width: GRID_X_SIZE as u32,
         height: GRID_Z_SIZE as u32,
@@ -120,14 +120,14 @@ pub fn setup_textures(
     };
 
     let mut textures = GpuTextures::default();
-    textures.insert(
-        GpuTexture::HeightOffsets,
-        images.add(make_storage_image("height_field_mat", render_size, TextureFormat::Rgba32Float)),
-    );
-    textures.insert(
-        GpuTexture::HeightNormals,
-        images.add(make_storage_image("normal_field_mat", render_size, TextureFormat::Rgba32Float)),
-    );
+    // textures.insert(
+    //     GpuTexture::HeightOffsets,
+    //     images.add(make_storage_image("height_field_mat", render_size, TextureFormat::Rgba32Float)),
+    // );
+    // textures.insert(
+    //     GpuTexture::HeightNormals,
+    //     images.add(make_storage_image("normal_field_mat", render_size, TextureFormat::Rgba32Float)),
+    // );
     textures.insert(
         GpuTexture::AmplitudeA,
         images.add(make_storage_image("amplitude_texture_a", amplitude_size, TextureFormat::R32Float)),
@@ -202,11 +202,11 @@ fn debug_input_system(
 // pub const GRID_X_SIZE: usize = 64;
 // pub const GRID_Z_SIZE: usize = 64;
 
-// pub const GRID_X_SIZE: usize = 256;
-// pub const GRID_Z_SIZE: usize = 256;
+pub const GRID_X_SIZE: usize = 256;
+pub const GRID_Z_SIZE: usize = 256;
 
-pub const GRID_X_SIZE: usize = 1024;
-pub const GRID_Z_SIZE: usize = 1024;
+// pub const GRID_X_SIZE: usize = 1024;
+// pub const GRID_Z_SIZE: usize = 1024;
 
 // pub const GRID_X_SIZE: usize = 128;
 // pub const GRID_Z_SIZE: usize = 128;
@@ -219,20 +219,11 @@ pub const DIRECTIONS: usize = 32;
 // pub const DIRECTIONS: usize = 16;
 // pub const TOTAL_ZETA_NUMBERS: usize = 1;
 pub const TOTAL_ZETA_NUMBERS: usize = 4;
-pub const MIN_ZETA: f32 = -5.0;
+pub const MIN_ZETA: f32 = -2.0;
 pub const MAX_ZETA: f32 = 3.3;
 // pub const MAX_ZETA: f32 = -3.0;
 pub const WIND_SPEED: f32 = 10.0;
 const GRAVITY: f32 = 9.81;
-
-// pub const RENDER_X_SIZE: usize = 256;
-// pub const RENDER_Z_SIZE: usize = 256;
-// pub const RENDER_X_SIZE: usize = 128;
-// pub const RENDER_Z_SIZE: usize = 128;
-pub const RENDER_X_SIZE: usize = 2048;
-pub const RENDER_Z_SIZE: usize = 2048;
-// pub const RENDER_X_SIZE: usize = 64;
-// pub const RENDER_Z_SIZE: usize = 64;
 
 
 // pub const PROFILE_BUFFER_LENGTH: usize = 512;
@@ -250,8 +241,8 @@ pub struct WaterSettings {
 /// Keys for every `Handle<Image>` the watering pipeline owns.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum GpuTexture {
-    HeightOffsets,
-    HeightNormals,
+    // HeightOffsets,
+    // HeightNormals,
     AmplitudeA,
     AmplitudeB,
     Profile,

@@ -74,7 +74,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
             let weight1 = p / period;
             let weight2 = 1 - weight1;
-            result += dx * waveLength * spectrum(zeta, 3.0) *
+            result += dx * waveLength * spectrum(zeta, 10.0) *
                    (cubic_bump(weight1) * gerstner_wave(phase1, waveNumber) +
                     cubic_bump(weight2) * gerstner_wave(phase2, waveNumber));
 

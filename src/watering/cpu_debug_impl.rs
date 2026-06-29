@@ -7,7 +7,7 @@ use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::Face;
 use crate::utils;
-use super::{PreComputedWaveData, WaterDebugSettings, WaterSettings, DIRECTIONS, GRAVITY, GRID_X_SIZE, GRID_Z_SIZE, MAX_ZETA, MIN_ZETA, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_ZETA_NUMBERS, WIND_SPEED};
+use super::{PreComputedWaveData, WaterDebugSettings, WaterSettings, DIRECTIONS, GRAVITY, GRID_X_SIZE, GRID_Z_SIZE, MAX_ZETA, MIN_ZETA, PROFILE_BUFFER_LENGTH, TOTAL_ZETA_NUMBERS, WIND_SPEED};
 use crate::utils::{build_grid_mesh, sample_bilinear_vec4};
 use crate::watering::shader_utils::precompute_jonswap_spectrum_amplitudes;
 
@@ -147,6 +147,15 @@ const DIRECTIONAL_OFFSETS: [f32; 64] = [
     3881.9890190707797,
 ];
 
+// pub const RENDER_X_SIZE: usize = 256;
+// pub const RENDER_Z_SIZE: usize = 256;
+// pub const RENDER_X_SIZE: usize = 128;
+// pub const RENDER_Z_SIZE: usize = 128;
+// pub const RENDER_X_SIZE: usize = 2048;
+// pub const RENDER_Z_SIZE: usize = 2048;
+pub const RENDER_X_SIZE: usize = 64;
+pub const RENDER_Z_SIZE: usize = 64;
+
 // because of some stuff, higher values of this make smaller profile
 const INTEGRATION_STEPS: usize = 64;
 const PERIODICITY: f32 = 2.0;
@@ -192,7 +201,7 @@ impl Plugin for CpuDebugWatering {
 
 fn precompute_jonswap_spectrum(
     mut resources: ResMut<CpuDebugWateringResources>,
-) { 
+) {
     resources.precomputed_jonswap = precompute_jonswap_spectrum_amplitudes(MIN_ZETA, MAX_ZETA, DIRECTIONS, TOTAL_ZETA_NUMBERS, 1024);
 }
 
@@ -676,8 +685,8 @@ pub fn inject_amplitude(
 
                     let relax_constant: f32 = 60.0 * (min_zeta / mid_zeta);
 
-                    amplitude_out[layer][z][x] = amplitude_out[layer][z][x] +
-                        (amplitude_out[layer][z][x].normalize_or(vec2(1.0,0.0)) * f32::max(0.0,jonswap_in[layer] - Vec2::length(amplitude_out[layer][z][x])) / relax_constant);
+                    // amplitude_out[layer][z][x] = amplitude_out[layer][z][x] +
+                    //     (amplitude_out[layer][z][x].normalize_or(vec2(1.0,0.0)) * f32::max(0.0,jonswap_in[layer] - Vec2::length(amplitude_out[layer][z][x])) / relax_constant);
 
                     // amplitude_out[layer][z][x] = vec2(debug_settings.scale, 0.0);
                 }
