@@ -6,13 +6,10 @@ use bevy::app::hotpatch::call;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::Face;
-use super::{
-    GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
-    DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
-    MIN_ZETA, MAX_ZETA, GRAVITY,
-    WaterSettings, WaterDebugSettings, WaterWaveGroupSpeeds,
-};
+use crate::utils;
+use super::{PreComputedWaveData, WaterDebugSettings, WaterSettings, DIRECTIONS, GRAVITY, GRID_X_SIZE, GRID_Z_SIZE, MAX_ZETA, MIN_ZETA, PROFILE_BUFFER_LENGTH, RENDER_X_SIZE, RENDER_Z_SIZE, TOTAL_ZETA_NUMBERS, WIND_SPEED};
 use crate::utils::{build_grid_mesh, sample_bilinear_vec4};
+use crate::watering::shader_utils::precompute_jonswap_spectrum_amplitudes;
 
 /// Directional offsets for phase coherence (matches water_common.wgsl)
 // const DIRECTIONAL_OFFSETS: [f32; 64] = [
@@ -81,29 +78,78 @@ use crate::utils::{build_grid_mesh, sample_bilinear_vec4};
 //     6.086835766330224,
 //     6.1850105367549055
 // ];
-const DIRECTIONAL_OFFSETS: [f32; 64] = [0.0; 64];
+// const DIRECTIONAL_OFFSETS: [f32; 64] = [0.0; 64];
+
+const DIRECTIONAL_OFFSETS: [f32; 64] = [
+    2017.1137690233031,
+    1914.554019280652,
+    252.8842729870496,
+    2364.204238117279,
+    2272.047711196246,
+    3769.993600332198,
+    2018.252473273144,
+    1894.654634303094,
+    3346.8084536066153,
+    2482.1801844920146,
+    2022.2771285203407,
+    1372.4756208769172,
+    844.3088392111434,
+    2424.116386933161,
+    541.6714297194034,
+    5022.75715894721,
+    2092.4843110871184,
+    2168.5060771215176,
+    1577.2258360887968,
+    898.5602183504437,
+    695.3568475110194,
+    950.0499317224302,
+    1007.5760298775771,
+    2347.4312378452196,
+    1377.9131351004612,
+    2163.4023144547036,
+    2310.4430800240875,
+    523.8760526227969,
+    1266.5906224172436,
+    1010.0685970006498,
+    3765.33810792837,
+    1000.4757812969365,
+    2980.2591395575846,
+    3290.9338859504714,
+    4118.601127716592,
+    3583.1314174026174,
+    4223.719667945748,
+    1157.468378275595,
+    4889.47466244211,
+    3056.1218028707412,
+    3772.779861419736,
+    4481.14255860156,
+    3860.8988032268444,
+    965.9440350321557,
+    797.5422361898694,
+    2331.981246509612,
+    2539.216924284179,
+    3305.635565302551,
+    4930.834677198391,
+    3847.323637189779,
+    3017.8244300668002,
+    1664.1203734896737,
+    3763.768303859234,
+    982.6685526662692,
+    2596.013705810474,
+    3881.0869503241724,
+    1168.182274259741,
+    2596.5906434316366,
+    1896.4369531158463,
+    232.71623257634872,
+    988.8623432740496,
+    260.50675916319847,
+    2774.353140338658,
+    3881.9890190707797,
+];
 
 // because of some stuff, higher values of this make smaller profile
 const INTEGRATION_STEPS: usize = 64;
 const PERIODICITY: f32 = 2.0;
-
-/// Convert direction index to radians
-#[inline]
-fn index_to_radians(i: usize) -> f32 {
-    (i as f32 + 0.0) * (TAU / DIRECTIONS as f32)
-}
-
-/// Compute layer index for amplitude texture array
-#[inline]
-fn layer_index(theta_index: usize, zeta_index: usize) -> usize {
-    zeta_index * DIRECTIONS + theta_index
-}
-
-/// Modulo that handles negative numbers correctly
-#[inline]
-fn modulo(x: f32, n: f32) -> f32 {
-    x - ((x / n).floor() * n)
-}
 
 // SYSTEMS
 #[derive(Resource)]
@@ -112,6 +158,7 @@ pub struct CpuDebugWateringResources {
     pub profile_buffer: ProfileBuffer, //for each zeta index and then profile length
     pub height_buffer: HeightBuffer,
     pub normal_buffer: NormalBuffer,
+    pub precomputed_jonswap: Vec<f32>, //indexed by layer_index(theta,zeta)
 }
 
 #[derive(Component)]
@@ -136,11 +183,19 @@ impl Plugin for CpuDebugWatering {
             profile_buffer: new_profile_buffer(),
             height_buffer: new_height_buffer(),
             normal_buffer: new_normal_buffer(),
+            precomputed_jonswap: vec![0.0; TOTAL_ZETA_NUMBERS*DIRECTIONS]
         });
-        app.add_systems(Startup, init_debug_water_mesh);
+        app.add_systems(Startup, (init_debug_water_mesh, precompute_jonswap_spectrum));
         app.add_systems(Update, update);
     }
 }
+
+fn precompute_jonswap_spectrum(
+    mut resources: ResMut<CpuDebugWateringResources>,
+) { 
+    resources.precomputed_jonswap = precompute_jonswap_spectrum_amplitudes(MIN_ZETA, MAX_ZETA, DIRECTIONS, TOTAL_ZETA_NUMBERS, 1024);
+}
+
 
 fn init_debug_water_mesh(
     mut commands: Commands,
@@ -177,7 +232,7 @@ fn get_offset_for_position(render_pos: Vec2, zeta_index: usize, theta_index: usi
         render_pos.x * (RENDER_X_SIZE as f32 / GRID_X_SIZE as f32),
         render_pos.y * (RENDER_Z_SIZE as f32 / GRID_Z_SIZE as f32)
     );
-    let theta = index_to_radians(theta_index);
+    let theta = utils::index_to_radians(theta_index);
     let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
 
     let zeta_full_range = MAX_ZETA - MIN_ZETA;
@@ -196,7 +251,7 @@ fn get_offset_for_position(render_pos: Vec2, zeta_index: usize, theta_index: usi
 
     // Profile buffer index (wrapping)
     let profile_coord = position_offset + DIRECTIONAL_OFFSETS[theta_index];
-    let index = modulo(
+    let index = utils::modulo(
         PROFILE_BUFFER_LENGTH as f32 * (profile_coord / period),
         PROFILE_BUFFER_LENGTH as f32,
     ) as usize;
@@ -224,7 +279,7 @@ fn update(
     key: Res<ButtonInput<KeyCode>>,
     debug_mesh_query: Query<&Mesh3d, With<DebugWaterMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    wave_group_speeds: Res<WaterWaveGroupSpeeds>,
+    wave_group_speeds: Res<PreComputedWaveData>,
 ){
 
     if(key.pressed(KeyCode::KeyC)) {
@@ -246,7 +301,7 @@ fn update(
         call(|| build_profile(&mut cpu_debug_watering_resources.profile_buffer, &water_settings));
         call(|| advect_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &wave_group_speeds, delta_time));
         call(|| diffuse_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &wave_group_speeds, delta_time));
-        call(|| inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &water_settings, &water_debug_settings));
+        call(|| inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &cpu_debug_watering_resources.precomputed_jonswap, &water_settings, &water_debug_settings));
         call(|| reconstruct_height(&cpu_debug_watering_resources.amplitude_buffer, &cpu_debug_watering_resources.profile_buffer, &mut cpu_debug_watering_resources.height_buffer, &mut cpu_debug_watering_resources.normal_buffer, &water_settings, Some(&mut gizmos)));
         // inject_amplitude(&mut cpu_debug_watering_resources.amplitude_buffer, &water_settings, &water_debug_settings);
         // build_profile(&mut cpu_debug_watering_resources.profile_buffer, &water_settings);
@@ -327,23 +382,23 @@ fn update(
             let pos = vec3(x as f32/RENDER_X_SIZE as f32, 0.0, z as f32/RENDER_Z_SIZE as f32) + offset;
             let offset = cpu_debug_watering_resources.height_buffer[z][x];
             let normal = cpu_debug_watering_resources.normal_buffer[z][x];
-            gizmos.line(
-                pos,
-                pos + (offset.xyz() /(RENDER_X_SIZE as f32 * 1.0)),
-                Color::srgba(1.0, x as f32/RENDER_X_SIZE as f32, z as f32/RENDER_Z_SIZE as f32, 1.0),
-            );
-
-            gizmos.line(
-                pos,
-                pos + (normal.xyz()*0.01),
-                Color::srgba(x as f32/RENDER_X_SIZE as f32, 1.0, z as f32/RENDER_Z_SIZE as f32, 1.0),
-            );
-            if(x==0&&z==0){
-                gizmos.text(Isometry3d {
-                    translation: (pos + vec3(0.0, 0.5, 0.0)).into(),
-                    ..default()
-                }, &format!("x{} z{} height {} normal {}", x, z, offset, normal), 0.1, Vec2::new(0.5,0.5), Color::srgba_u8(0,255,0,255));
-            }
+            // gizmos.line(
+            //     pos,
+            //     pos + (offset.xyz() /(RENDER_X_SIZE as f32 * 1.0)),
+            //     Color::srgba(1.0, x as f32/RENDER_X_SIZE as f32, z as f32/RENDER_Z_SIZE as f32, 1.0),
+            // );
+            //
+            // gizmos.line(
+            //     pos,
+            //     pos + (normal.xyz()*0.01),
+            //     Color::srgba(x as f32/RENDER_X_SIZE as f32, 1.0, z as f32/RENDER_Z_SIZE as f32, 1.0),
+            // );
+            // if(x==0&&z==0){
+            //     gizmos.text(Isometry3d {
+            //         translation: (pos + vec3(0.0, 0.5, 0.0)).into(),
+            //         ..default()
+            //     }, &format!("x{} z{} height {} normal {}", x, z, offset, normal), 0.1, Vec2::new(0.5,0.5), Color::srgba_u8(0,255,0,255));
+            // }
         }
     }
 
@@ -410,7 +465,7 @@ fn sample_amplitude_bilinear(
     if x < 1.0 || x >= (GRID_X_SIZE - 1) as f32 || z < 1.0 || z >= (GRID_Z_SIZE - 1) as f32 {
         return Vec2::ZERO;
     }
-    let layer = layer_index(theta_index, zeta_index);
+    let layer = utils::layer_index(theta_index, zeta_index);
     let x0 = x.floor() as usize;
     let z0 = z.floor() as usize;
     let x1 = x0 + 1;
@@ -432,19 +487,19 @@ fn sample_amplitude_bilinear(
 /// `delta_time` and resample the amplitude at the previous position.
 pub fn advect_amplitude(
     amplitude_io: &mut AmplitudeBuffer,
-    wave_group_speeds: &WaterWaveGroupSpeeds,
+    wave_group_speeds: &PreComputedWaveData,
     delta_time: f32,
 ) {
     // Read from a frozen snapshot so each cell sees last frame's state.
     let prev = amplitude_io.clone();
 
     for theta_index in 0..DIRECTIONS {
-        let theta = index_to_radians(theta_index);
+        let theta = utils::index_to_radians(theta_index);
         let cos_theta = f32::cos(theta);
         let sin_theta = f32::sin(theta);
 
         for zeta_index in 0..TOTAL_ZETA_NUMBERS {
-            let layer = layer_index(theta_index, zeta_index);
+            let layer = utils::layer_index(theta_index, zeta_index);
             let group_speed = wave_group_speeds.wave_group_speeds[zeta_index].x;
             let dx = cos_theta * group_speed * delta_time;
             let dz = sin_theta * group_speed * delta_time;
@@ -477,7 +532,7 @@ fn wrap_direction(d: i32) -> usize {
 /// amount proportional to the wave group speed and `delta_time`.
 pub fn diffuse_amplitude(
     amplitude_io: &mut AmplitudeBuffer,
-    wave_group_speeds: &WaterWaveGroupSpeeds,
+    wave_group_speeds: &PreComputedWaveData,
     delta_time: f32,
 ) {
     let prev = amplitude_io.clone();
@@ -487,9 +542,9 @@ pub fn diffuse_amplitude(
         let theta_p1 = wrap_direction(theta_index as i32 + 1);
 
         for zeta_index in 0..TOTAL_ZETA_NUMBERS {
-            let layer = layer_index(theta_index, zeta_index);
-            let layer_m1 = layer_index(theta_m1, zeta_index);
-            let layer_p1 = layer_index(theta_p1, zeta_index);
+            let layer = utils::layer_index(theta_index, zeta_index);
+            let layer_m1 = utils::layer_index(theta_m1, zeta_index);
+            let layer_p1 = utils::layer_index(theta_p1, zeta_index);
 
             let group_speed = wave_group_speeds.wave_group_speeds[zeta_index].x;
             let gamma = 2.0 * 0.025 * group_speed * delta_time * 0.5;
@@ -526,13 +581,14 @@ pub fn new_amplitude_buffer() -> AmplitudeBuffer {
 pub fn inject_amplitude(
     amplitude_out: &mut AmplitudeBuffer,
     profile_in: &ProfileBuffer,
+    jonswap_in: &Vec<f32>,
     water_settings: &WaterSettings,
     debug_settings: &WaterDebugSettings,
 ) {
     // Skip if injection is not active
-    if debug_settings.inject < 0.5 {
-        return;
-    }
+    // if debug_settings.inject < 0.5 {
+    //     return;
+    // }
 
     let zeta_full_range = MAX_ZETA - MIN_ZETA;
 
@@ -545,14 +601,14 @@ pub fn inject_amplitude(
             .sqrt();
 
             // Skip if outside injection radius
-            if dist > debug_settings.radius {
-                continue;
-            }
+            // if dist > debug_settings.radius {
+            //     continue;
+            // }
 
             for theta_index in 0..DIRECTIONS {
             // for theta_index in 0..1{
                 // let theta_index = 0;
-                let theta = index_to_radians(theta_index);
+                let theta = utils::index_to_radians(theta_index);
                 let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
 
                 for zeta_index in 0..TOTAL_ZETA_NUMBERS {
@@ -577,7 +633,7 @@ pub fn inject_amplitude(
                     // profile coord from height reconstruction
                     let profile_coord = (position_offset + DIRECTIONAL_OFFSETS[theta_index]);
                     // index used by height reconstruction
-                    let index = modulo(
+                    let index = utils::modulo(
                         PROFILE_BUFFER_LENGTH as f32 * (profile_coord / period),
                         PROFILE_BUFFER_LENGTH as f32,
                     ) as usize;
@@ -589,7 +645,7 @@ pub fn inject_amplitude(
 
                     // Create amplitude with correct phase
                     // Note: shader stores (scale, 0.0) - simplified version
-                    let layer = layer_index(theta_index, zeta_index);
+                    let layer = utils::layer_index(theta_index, zeta_index);
                     let mut best_index = index;
 
                     // for i in (PROFILE_BUFFER_LENGTH as i32)/-8..(PROFILE_BUFFER_LENGTH as i32)/8 {
@@ -614,7 +670,15 @@ pub fn inject_amplitude(
                         // f32::sin((-0.0)+(debug_settings.spawn_center_x*0.01))
                     );
 
-                    amplitude_out[layer][z][x] = amplitude * debug_settings.scale;
+                    if debug_settings.inject > 0.5 && dist <= debug_settings.radius {
+                        amplitude_out[layer][z][x] = amplitude * debug_settings.scale;
+                    }
+
+                    let relax_constant: f32 = 60.0 * (min_zeta / mid_zeta);
+
+                    amplitude_out[layer][z][x] = amplitude_out[layer][z][x] +
+                        (amplitude_out[layer][z][x].normalize_or(vec2(1.0,0.0)) * f32::max(0.0,jonswap_in[layer] - Vec2::length(amplitude_out[layer][z][x])) / relax_constant);
+
                     // amplitude_out[layer][z][x] = vec2(debug_settings.scale, 0.0);
                 }
             }
@@ -672,7 +736,6 @@ fn gerstner_wave(phase: f32, knum: f32) -> Vec4 {
 /// Pre-computes the Gerstner wave profile for each zeta band.
 pub fn build_profile(profile_out: &mut ProfileBuffer, settings: &WaterSettings) {
     let zeta_full_range = MAX_ZETA - MIN_ZETA;
-    let wind_speed = 3.0; // Hardcoded in shader
 
     for zeta_index in 0..TOTAL_ZETA_NUMBERS {
         let min_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.0) / TOTAL_ZETA_NUMBERS as f32));
@@ -705,7 +768,7 @@ pub fn build_profile(profile_out: &mut ProfileBuffer, settings: &WaterSettings) 
                 let weight2 = 1.0 - weight1;
 
 
-                result += wave_length * spectrum(zeta, wind_speed) * (
+                result += wave_length * spectrum(zeta, WIND_SPEED) * (
                     // (gerstner_wave(phase1, wave_number))
                       (cubic_bump(weight1) * gerstner_wave(phase1, wave_number))
                     + (cubic_bump(weight2) * gerstner_wave(phase2, wave_number))
@@ -762,7 +825,7 @@ fn sample_amplitude(
     theta_index: usize,
     zeta_index: usize,
 ) -> Vec2 {
-    let layer = layer_index(theta_index, zeta_index);
+    let layer = utils::layer_index(theta_index, zeta_index);
 
     // Clamp to valid range
     let x_clamped = x.clamp(0.0, (GRID_X_SIZE - 1) as f32);
@@ -842,7 +905,7 @@ pub fn reconstruct_height(
 
                 for theta_index in 0..DIRECTIONS {
                 // for theta_index in 0..1{
-                    let theta = index_to_radians(theta_index);
+                    let theta = utils::index_to_radians(theta_index);
                     let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
 
                     // Sample amplitude at this position and direction
@@ -853,7 +916,7 @@ pub fn reconstruct_height(
 
                     // Profile buffer index (wrapping)
                     let profile_coord = position_offset + DIRECTIONAL_OFFSETS[theta_index];
-                    let index = modulo(
+                    let index = utils::modulo(
                         PROFILE_BUFFER_LENGTH as f32 * (profile_coord / period),
                         PROFILE_BUFFER_LENGTH as f32,
                     ) as usize;
@@ -926,6 +989,7 @@ pub struct CpuWaterSimulation {
     pub profile: ProfileBuffer,
     pub height: HeightBuffer,
     pub normal: NormalBuffer,
+    pub jonswap: Vec<f32>,
 }
 
 impl CpuWaterSimulation {
@@ -936,12 +1000,13 @@ impl CpuWaterSimulation {
             profile: new_profile_buffer(),
             height: new_height_buffer(),
             normal: new_normal_buffer(),
+            jonswap: vec![0.0; TOTAL_ZETA_NUMBERS * DIRECTIONS],
         }
     }
 
     /// Run the water injection pass
     pub fn inject(&mut self, settings: &WaterSettings, debug_settings: &WaterDebugSettings) {
-        inject_amplitude(&mut self.amplitude, &self.profile, settings, debug_settings);
+        inject_amplitude(&mut self.amplitude, &self.profile, &self.jonswap, settings, debug_settings);
     }
 
     /// Run the profile generation pass
@@ -1012,6 +1077,8 @@ impl Default for CpuWaterSimulation {
 
 #[cfg(test)]
 mod tests {
+    use crate::utils::{index_to_radians, layer_index, modulo};
+    use crate::watering::WIND_SPEED;
     use super::*;
 
     #[test]
@@ -1044,7 +1111,7 @@ mod tests {
     #[test]
     fn test_spectrum() {
         // Spectrum should be positive for reasonable inputs
-        let s = spectrum(0.0, 3.0);
+        let s = spectrum(0.0, WIND_SPEED);
         assert!(s > 0.0);
     }
 

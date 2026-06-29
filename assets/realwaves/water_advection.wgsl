@@ -6,7 +6,7 @@
     GRID_X_SIZE, GRID_Z_SIZE, GRID_SCALE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
     ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
-    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
+    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, PreComputedWaveData,
     index_to_radians, layer_index
 }
 
@@ -16,7 +16,7 @@
 @group(0) @binding(3) var<uniform> settings: WaterSettings;
 @group(0) @binding(4) var voxel_texture: texture_3d<u32>;
 @group(0) @binding(5) var<uniform> voxel_settings: VoxelSettings;
-@group(0) @binding(6) var<uniform> water_wave_group_speeds: WaterWaveGroupSpeeds;
+@group(0) @binding(6) var<uniform> pre_computed_wave_data: PreComputedWaveData;
 @group(0) @binding(7) var sdf_texture: texture_3d<f32>;
 
 // Hardware bilinear sampling using sampler
@@ -114,7 +114,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
         let layer = layer_index(theta_index, zeta_index);
 
-        let group_speed = (water_wave_group_speeds.wave_group_speeds[zeta_index].x);
+        let group_speed = (pre_computed_wave_data.wave_group_speeds[zeta_index].x);
 
         // Displacement based on group velocity
         let dx = cos(theta) * group_speed * settings.delta_time;

@@ -12,7 +12,7 @@ use bevy::render::render_resource::{Extent3d, ShaderType, TextureFormat};
 use crate::BuildData;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use crate::watering::cpu_debug_impl::CpuDebugWatering;
-use crate::watering::shader_utils::{compute_group_speeds, make_storage_image};
+use crate::watering::shader_utils::{compute_group_speeds, make_storage_image, precompute_jonswap_spectrum_amplitudes};
 
 pub struct Watering;
 impl Plugin for Watering{
@@ -41,8 +41,10 @@ impl Plugin for Watering{
             })
             .insert_resource(GpuTextures::default())
             .insert_resource(WaterPingPong::default())
-            .insert_resource(WaterWaveGroupSpeeds {
-                wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_ZETA_NUMBERS).iter().map(|x| vec4(*x * GRID_SCALE, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap()
+            .insert_resource(PreComputedWaveData {
+                wave_group_speeds: compute_group_speeds(MIN_ZETA, MAX_ZETA, WIND_SPEED, TOTAL_ZETA_NUMBERS).iter().map(|x| vec4(*x * GRID_SCALE, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap(),
+
+                jonswap_spectrum_amplitudes: precompute_jonswap_spectrum_amplitudes(MIN_ZETA, MAX_ZETA, DIRECTIONS, TOTAL_ZETA_NUMBERS, 1024).iter().map(|x| vec4(*x, 0.0, 0.0, 0.0)).collect::<Vec<_>>().try_into().unwrap(),
             })
             .insert_resource(VoxelSettings::default())
             .add_systems(Startup, (setup_textures))
@@ -57,7 +59,7 @@ impl Plugin for Watering{
                 .add_plugins(ExtractResourcePlugin::<WaterSettings>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterDebugSettings>::default())
                 .add_plugins(ExtractResourcePlugin::<VoxelSettings>::default())
-                .add_plugins(ExtractResourcePlugin::<WaterWaveGroupSpeeds>::default())
+                .add_plugins(ExtractResourcePlugin::<PreComputedWaveData>::default())
                 .add_plugins(ExtractResourcePlugin::<GpuTextures>::default())
                 .add_plugins(ExtractResourcePlugin::<WaterPingPong>::default())
             ;
@@ -203,32 +205,38 @@ fn debug_input_system(
 // pub const GRID_X_SIZE: usize = 256;
 // pub const GRID_Z_SIZE: usize = 256;
 
-pub const GRID_X_SIZE: usize = 256;
-pub const GRID_Z_SIZE: usize = 256;
+pub const GRID_X_SIZE: usize = 1024;
+pub const GRID_Z_SIZE: usize = 1024;
+
+// pub const GRID_X_SIZE: usize = 128;
+// pub const GRID_Z_SIZE: usize = 128;
 // pub const GRID_X_SIZE: usize = 64;
 // pub const GRID_Z_SIZE: usize = 64;
 pub const GRID_SCALE: f32 = 1.0; //how many meters each grid cell represents
 
 // pub const DIRECTIONS: usize = 1;
 pub const DIRECTIONS: usize = 32;
+// pub const DIRECTIONS: usize = 16;
 // pub const TOTAL_ZETA_NUMBERS: usize = 1;
 pub const TOTAL_ZETA_NUMBERS: usize = 4;
 pub const MIN_ZETA: f32 = -5.0;
 pub const MAX_ZETA: f32 = 3.3;
 // pub const MAX_ZETA: f32 = -3.0;
-pub const WIND_SPEED: f32 = 3.0;
+pub const WIND_SPEED: f32 = 10.0;
 const GRAVITY: f32 = 9.81;
 
 // pub const RENDER_X_SIZE: usize = 256;
 // pub const RENDER_Z_SIZE: usize = 256;
+// pub const RENDER_X_SIZE: usize = 128;
+// pub const RENDER_Z_SIZE: usize = 128;
 pub const RENDER_X_SIZE: usize = 2048;
 pub const RENDER_Z_SIZE: usize = 2048;
 // pub const RENDER_X_SIZE: usize = 64;
 // pub const RENDER_Z_SIZE: usize = 64;
 
 
-pub const PROFILE_BUFFER_LENGTH: usize = 512;
-// pub const PROFILE_BUFFER_LENGTH: usize = 4096;
+// pub const PROFILE_BUFFER_LENGTH: usize = 512;
+pub const PROFILE_BUFFER_LENGTH: usize = 4096;
 
 //to be put in main world
 #[derive(Resource, ExtractResource, Clone, ShaderType)]
@@ -309,8 +317,9 @@ pub struct VoxelSettings {
 }
 
 #[derive(Resource, ExtractResource, Clone, ShaderType)]
-pub struct WaterWaveGroupSpeeds{
+pub struct PreComputedWaveData {
     pub wave_group_speeds: [Vec4; TOTAL_ZETA_NUMBERS],
+    pub jonswap_spectrum_amplitudes: [Vec4; TOTAL_ZETA_NUMBERS * DIRECTIONS],
 }
 
 impl Default for VoxelSettings {

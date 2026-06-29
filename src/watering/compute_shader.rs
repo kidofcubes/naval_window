@@ -6,7 +6,7 @@ use bevy::render::render_resource::binding_types::{sampler, texture_2d_array, te
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::GpuImage;
 use strum::AsRefStr;
-use crate::watering::{VoxelSettings, WaterDebugSettings, WaterPingPong, WaterSettings, GpuTexture, GpuTextures, WaterWaveGroupSpeeds};
+use crate::watering::{VoxelSettings, WaterDebugSettings, WaterPingPong, WaterSettings, GpuTexture, GpuTextures, PreComputedWaveData};
 use crate::watering::shader_utils::{create_clamp_linear_sampler, encode_uniform, grid_workgroups, profile_workgroups};
 
 // ─── Pass / Buffer Enums ─────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ pub enum Buffers {
     Settings,
     DebugSettings,
     VoxelSettings,
-    WaterWaveGroupSpeeds,
+    PreComputedWaveData,
 }
 
 // ─── GPU Resources ────────────────────────────────────────────────────────────
@@ -156,6 +156,7 @@ impl FromWorld for WaterPipelines {
             texture_storage_2d_array(TextureFormat::R32Float, StorageTextureAccess::ReadWrite),
             uniform_buffer::<WaterSettings>(false),
             uniform_buffer::<WaterDebugSettings>(false),
+            uniform_buffer::<PreComputedWaveData>(false),
             texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::ReadOnly),
         ));
 
@@ -166,7 +167,7 @@ impl FromWorld for WaterPipelines {
             uniform_buffer::<WaterSettings>(false),
             texture_3d(bevy::render::render_resource::TextureSampleType::Uint),
             uniform_buffer::<VoxelSettings>(false),
-            uniform_buffer::<WaterWaveGroupSpeeds>(false),
+            uniform_buffer::<PreComputedWaveData>(false),
             texture_3d(bevy::render::render_resource::TextureSampleType::Float { filterable: false }),
         ));
 
@@ -175,7 +176,7 @@ impl FromWorld for WaterPipelines {
             sampler(bevy::render::render_resource::SamplerBindingType::Filtering),
             texture_storage_2d_array(TextureFormat::R32Float, StorageTextureAccess::WriteOnly),
             uniform_buffer::<WaterSettings>(false),
-            uniform_buffer::<WaterWaveGroupSpeeds>(false),
+            uniform_buffer::<PreComputedWaveData>(false),
         ));
 
 
@@ -199,7 +200,7 @@ pub fn queue_bind_groups(
     settings:      Res<WaterSettings>,
     debug_settings: Res<WaterDebugSettings>,
     voxel_settings: Res<VoxelSettings>,
-    water_wave_group_speeds:  Res<WaterWaveGroupSpeeds>,
+    water_wave_group_speeds:  Res<PreComputedWaveData>,
     existing_bgs:  Option<ResMut<WaterBindGroups>>,
     textures:      Res<GpuTextures>,
     ping_pong:     Res<WaterPingPong>,
@@ -248,7 +249,7 @@ pub fn queue_bind_groups(
         // WaterWaveGroupSpeeds uses dynamic alignment
         let mut dyn_buf = encase::DynamicUniformBuffer::new_with_alignment(Vec::<u8>::new(), 32);
         dyn_buf.write(&*water_wave_group_speeds).expect("ShaderType write failed");
-        bufs.insert(Buffers::WaterWaveGroupSpeeds, mk("water_wave_group_speeds_buf", dyn_buf.into_inner()));
+        bufs.insert(Buffers::PreComputedWaveData, mk("water_wave_group_speeds_buf", dyn_buf.into_inner()));
 
         bufs
     };
@@ -267,7 +268,7 @@ pub fn queue_bind_groups(
     let settings_buf        = &buffers[&Buffers::Settings];
     let debug_settings_buf  = &buffers[&Buffers::DebugSettings];
     let voxel_settings_buf  = &buffers[&Buffers::VoxelSettings];
-    let wave_speeds_buf     = &buffers[&Buffers::WaterWaveGroupSpeeds];
+    let wave_data_buf = &buffers[&Buffers::PreComputedWaveData];
 
     let mut bind_groups = HashMap::new();
 
@@ -278,6 +279,7 @@ pub fn queue_bind_groups(
             amp_write,
             settings_buf.as_entire_binding(),
             debug_settings_buf.as_entire_binding(),
+            wave_data_buf.as_entire_binding(),
             &profile.texture_view,
         )),
     ));
@@ -292,7 +294,7 @@ pub fn queue_bind_groups(
             settings_buf.as_entire_binding(),
             voxel_texture_view,
             voxel_settings_buf.as_entire_binding(),
-            wave_speeds_buf.as_entire_binding(),
+            wave_data_buf.as_entire_binding(),
             sdf_texture_view,
         )),
     ));
@@ -305,7 +307,7 @@ pub fn queue_bind_groups(
             &gpu.clamp_linear_sampler,
             amp_read,
             settings_buf.as_entire_binding(),
-            wave_speeds_buf.as_entire_binding(),
+            wave_data_buf.as_entire_binding(),
         )),
     ));
 

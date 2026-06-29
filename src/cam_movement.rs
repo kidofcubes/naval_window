@@ -285,7 +285,7 @@ pub fn move_player(
     
     
     
-    translation+= if mouse.pressed(MouseButton::Forward)||mouse.pressed(MouseButton::Back) {transform.up()} else {transform.forward()}*accumulated_mouse_scroll.delta.y;
+    translation+= if mouse.pressed(MouseButton::Forward)||mouse.pressed(MouseButton::Back) {transform.up()} else {transform.forward()}*accumulated_mouse_scroll.delta.y*1.0;
     translation+= transform.right()*accumulated_mouse_scroll.delta.x;
     transform.translation+=translation;
 }

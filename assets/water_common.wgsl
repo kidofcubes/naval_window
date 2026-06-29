@@ -5,12 +5,16 @@
 //const GRID_Z_SIZE: u32 = 64u;
 //const GRID_X_SIZE: u32 = 256u;
 //const GRID_Z_SIZE: u32 = 256u;
+
+const GRID_X_SIZE: u32 = 1024u;
+const GRID_Z_SIZE: u32 = 1024u;
 //const GRID_X_SIZE: u32 = 2048u;
 //const GRID_Z_SIZE: u32 = 2048u;
-const GRID_X_SIZE: u32 = 256u;
-const GRID_Z_SIZE: u32 = 256u;
+//const GRID_X_SIZE: u32 = 256u;
+//const GRID_Z_SIZE: u32 = 256u;
 
-const GRID_SCALE: f32 = 1.0;
+//const GRID_SCALE: f32 = 1.0;
+const GRID_SCALE: f32 = 0.25;
 
 //const RENDER_X_SIZE: u32 = 64u;
 //const RENDER_Z_SIZE: u32 = 64u;
@@ -165,8 +169,9 @@ struct VoxelSettings {
     grid_dims: vec3<u32>,
 }
 
-struct WaterWaveGroupSpeeds{
+struct PreComputedWaveData {
     wave_group_speeds: array<vec4<f32>,1>,
+    jonswap_spectrum_amplitudes: array<vec4<f32>,1>,
 }
 
 // Helper functions

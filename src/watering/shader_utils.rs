@@ -6,10 +6,9 @@ use bevy::render::render_resource::{
 };
 use bevy::render::renderer::RenderDevice;
 use encase::internal::WriteInto;
-use crate::watering::{
-    DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, PROFILE_BUFFER_LENGTH,
-};
-
+use crate::big_watering::OceanConfig;
+use crate::watering::{DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, MAX_ZETA, MIN_ZETA, PROFILE_BUFFER_LENGTH, TOTAL_ZETA_NUMBERS, WIND_SPEED};
+use crate::watering::cpu_debug_impl::CpuDebugWateringResources;
 // ─── Texture / sampler factories ────────────────────────────────────────────
 
 /// Build a storage-capable 2D or 2D-array `Image` whose dimensionality is
@@ -80,6 +79,58 @@ pub fn encode_uniform<T: ShaderType + WriteInto>(data: &T) -> Vec<u8> {
     buf.write(data).expect("ShaderType write failed");
     buf.into_inner()
 }
+
+
+pub fn precompute_jonswap_spectrum_amplitudes(
+    min_zeta: f32, max_zeta: f32, dir_count: usize, zeta_count: usize, integration_steps: usize
+) -> Vec<f32> {
+    let zeta_full_range = MAX_ZETA - MIN_ZETA;
+    let mut ocean_config = OceanConfig {
+        grid_size: 2048,
+        patch_length: 256.0,
+        wind_speed: WIND_SPEED,
+        wind_dir: Vec2::new(1.0, 1.0).normalize(),
+        amplitude: 1000_0000.0,
+        gravity: 9.81,
+        fetch: 1000_000.0,
+        gamma: 3.3,
+    };
+    let mut jonswap_amplitudes = vec![0.0; zeta_count*dir_count];
+
+
+    for theta_index in 0..dir_count {
+        let theta = (theta_index as f32 + 0.0) * (TAU / dir_count as f32);
+
+        let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
+
+
+        for zeta_index in 0..TOTAL_ZETA_NUMBERS {
+            let min_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) - 0.0) / (TOTAL_ZETA_NUMBERS as f32)));
+            let max_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) + 1.0) / (TOTAL_ZETA_NUMBERS as f32)));
+            let mid_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.5) / TOTAL_ZETA_NUMBERS as f32));
+
+
+            let dx = (max_zeta - min_zeta) / integration_steps as f32;
+
+            let layer = crate::utils::layer_index(theta_index, zeta_index);
+
+            let mut result: f32 = 0.0;
+
+            let result = integrate(min_zeta, max_zeta, |zeta| {
+                let wave_length = 2.0f32.powf(zeta);
+                let wave_number = TAU / wave_length;
+
+                let jonswap_value = crate::big_watering::jonswap_spectrum(wave_number * dir.x, wave_number * dir.z, &ocean_config);
+                return jonswap_value;
+            }, integration_steps as i32);
+
+            let result = f32::sqrt(result * (TAU/(DIRECTIONS as f32)));
+            jonswap_amplitudes[(zeta_index * dir_count) + theta_index] = result;
+        }
+    }
+    return jonswap_amplitudes;
+}
+
 
 // ─── Offline wave-spectrum precompute (was `pre_compute.rs`) ────────────────
 

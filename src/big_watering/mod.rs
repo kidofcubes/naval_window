@@ -16,15 +16,15 @@ impl Plugin for BigWatering {
     }
 }
 
-struct OceanConfig {
-    grid_size: usize,
-    patch_length: f32,
-    wind_speed: f32,
-    wind_dir: Vec2,
-    amplitude: f32,
-    gravity: f32,
-    fetch: f32,
-    gamma: f32,
+pub struct OceanConfig {
+    pub grid_size: usize,
+    pub patch_length: f32,
+    pub wind_speed: f32,
+    pub wind_dir: Vec2,
+    pub amplitude: f32,
+    pub gravity: f32,
+    pub fetch: f32,
+    pub gamma: f32,
 }
 
 impl Default for OceanConfig {
@@ -68,7 +68,7 @@ struct OceanSimulation {
     fft_scratch: Vec<Complex32>,
 }
 
-fn jonswap_spectrum(kx: f32, kz: f32, config: &OceanConfig) -> f32 {
+pub fn jonswap_spectrum(kx: f32, kz: f32, config: &OceanConfig) -> f32 {
     let wave_number = (kx * kx + kz * kz).sqrt();
     if wave_number < 1e-8 {
         return 0.0;

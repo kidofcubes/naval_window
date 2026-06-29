@@ -7,7 +7,7 @@
     GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
     ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
-    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
+    GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, PreComputedWaveData,
     index_to_radians, layer_index
 }
 
@@ -15,7 +15,7 @@
 @group(0) @binding(1) var amplitude_sampler: sampler;
 @group(0) @binding(2) var amplitude_out: texture_storage_2d_array<r32float, write>;
 @group(0) @binding(3) var<uniform> settings: WaterSettings;
-@group(0) @binding(4) var<uniform> water_wave_group_speeds: WaterWaveGroupSpeeds;
+@group(0) @binding(4) var<uniform> water_wave_group_speeds: PreComputedWaveData;
 
 fn sample_amplitude(x: u32, z: u32, theta_index: u32, wave_index: u32) -> f32 {
 //    if (x < 1.0 || x >= f32(GRID_X_SIZE - 1u) || z < 1.0 || z >= f32(GRID_Z_SIZE - 1u)) {

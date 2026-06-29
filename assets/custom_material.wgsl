@@ -150,7 +150,7 @@ fn calculate_water_surface(uv: vec2<f32>) -> WaterSurface {
     tx += vec3<f32>(1.0, 0.0, 0.0);
     tz += vec3<f32>(0.0, 0.0, 1.0);
 
-    result.offset = surface_offset / GRID_SCALE;
+    result.offset = surface_offset * GRID_SCALE;
     result.normal = normalize(cross(tz, tx));
     return result;
 }

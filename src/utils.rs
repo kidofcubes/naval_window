@@ -1,6 +1,8 @@
+use std::f32::consts::TAU;
 use bevy::math::{Vec2, Vec3, Vec4};
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::prelude::default;
+use crate::watering::DIRECTIONS;
 
 /// Build a flat XZ grid mesh with `cols` × `rows` vertices.
 /// Vertex (col, row) sits at `(origin.x + col * cell_size_x, 0, origin.y + row * cell_size_z)`.
@@ -102,4 +104,22 @@ pub fn sample_bilinear_normal(grid: &Vec<Vec<Vec3>>, fractional_col: f32, fracti
     let bot = v01 + (v11 - v01) * t_col;
     let result = top + (bot - top) * t_row;
     result.normalize_or_zero()
+}
+
+/// Convert direction index to radians
+#[inline]
+pub fn index_to_radians(i: usize) -> f32 {
+    (i as f32 + 0.0) * (TAU / DIRECTIONS as f32)
+}
+
+/// Compute layer index for amplitude texture array
+#[inline]
+pub fn layer_index(theta_index: usize, zeta_index: usize) -> usize {
+    zeta_index * DIRECTIONS + theta_index
+}
+
+/// Modulo that handles negative numbers correctly
+#[inline]
+pub fn modulo(x: f32, n: f32) -> f32 {
+    x - ((x / n).floor() * n)
 }
