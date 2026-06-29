@@ -4,7 +4,7 @@
 // This pass spreads energy between adjacent propagation directions
 
 #import "water_common.wgsl"::{
-    GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
+    GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE, GRID_SCALE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
     ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
     GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, PreComputedWaveData,
@@ -30,6 +30,14 @@ fn wrap_direction(d: i32) -> u32 {
     return u32((d % i32(DIRECTIONS) + i32(DIRECTIONS)) % i32(DIRECTIONS));
 }
 
+fn normalize_or_x(x: vec2<f32>) -> vec2<f32> {
+    if(length(x)==0){
+        return vec2<f32>(1.0, 0.0);
+    }else{
+        return normalize(x);
+    }
+}
+
 @compute @workgroup_size(32, 32, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let x = global_id.x;
@@ -51,18 +59,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let theta_p1 = wrap_direction(i32(theta_index) + 1);
 
         // Diffusion coefficient
-        let gamma = 2.0 * 0.025 * (water_wave_group_speeds.wave_group_speeds[zeta_index].x) * (settings.delta_time) * 0.5;
+        let gamma = 2.0 * 0.025 * (water_wave_group_speeds.wave_group_speeds[zeta_index].x) * (settings.delta_time) / (GRID_SCALE);
+//        let gamma = 0.5;
+
+        let uv = vec2<f32>((f32(x) + 0.5) / f32(GRID_X_SIZE), (f32(z) + 0.5) / f32(GRID_Z_SIZE));
+
+        let orig_amplitude = textureSampleLevel(amplitude_in, amplitude_sampler, uv, layer, 0.0).xy;
 
         // Sample magnitudes from adjacent directions at current position
         let amp_m1 = sample_amplitude(x, z, theta_m1, zeta_index);
-        let amp_0  = sample_amplitude(x, z, theta_index, zeta_index);
+        let amp_0  = length(orig_amplitude);
         let amp_p1 = sample_amplitude(x, z, theta_p1, zeta_index);
 
         // Weighted average of magnitudes
-        let new_amplitude = (1.0 - gamma) * amp_0 + (gamma * 0.5 * (amp_m1 + amp_p1));
-//        let new_amplitude = amp_0;
+        let new_amplitude_length = (1.0 - gamma) * amp_0 + (gamma * 0.5 * (amp_m1 + amp_p1));
+
+        let new_amplitude = normalize_or_x(orig_amplitude)*new_amplitude_length;
 
         // Write to output
-        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 0.0, 0.0));
+        textureStore(amplitude_out, vec2<i32>(i32(x), i32(z)), layer, vec4<f32>(new_amplitude, 0.0, 0.0));
     }
 }

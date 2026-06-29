@@ -1,5 +1,5 @@
 #import "water_common.wgsl"::{
-    GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE,
+    GRID_X_SIZE, GRID_Z_SIZE, RENDER_X_SIZE, RENDER_Z_SIZE, WIND_SPEED,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
     PERIODICITY, ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
     GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
@@ -52,8 +52,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let min_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) - 0.0) / f32(TOTAL_ZETA_NUMBERS)));
         let max_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 1.0) / f32(TOTAL_ZETA_NUMBERS)));
         let mid_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 0.5) / f32(TOTAL_ZETA_NUMBERS)));
-        let period: f32 = f32(PERIODICITY) * pow(2,mid_zeta);
 
+        let period: f32 = f32(PERIODICITY) * pow(2,max_zeta);
         let p = (f32(profile_index) * period) / f32(PROFILE_BUFFER_LENGTH);
 
         let dx = (max_zeta - min_zeta) / f32(INTEGRATION_STEPS);
@@ -63,18 +63,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         for(var i: u32 = 0u; i < INTEGRATION_STEPS; i++){
             let zeta = min_zeta + ((max_zeta - min_zeta) * ((f32(i) + 0.5) / f32(INTEGRATION_STEPS)));
 
+//            let period: f32 = f32(PERIODICITY) * pow(2,mid_zeta);
+//            let period: f32 = f32(PERIODICITY) * pow(2,zeta);
+
 //            let zeta = max_zeta;
 
             let waveLength = pow(2, zeta);
             let waveNumber = TAU / waveLength;
-//            let phase1 = waveNumber * (p         ) - (dispersionRelation(waveNumber) * (settings.elapsed_time+100.0));
-//            let phase2 = waveNumber * (p - period) - (dispersionRelation(waveNumber) * (settings.elapsed_time+100.0));
-            let phase1 = (waveNumber * (p         )) - (dispersionRelation(waveNumber) * ((settings.elapsed_time)));
-            let phase2 = (waveNumber * (p - period)) - (dispersionRelation(waveNumber) * ((settings.elapsed_time)));
+            let phase1 = waveNumber * (p         ) - (dispersionRelation(waveNumber) * (settings.elapsed_time+1000.0));
+            let phase2 = waveNumber * (p - period) - (dispersionRelation(waveNumber) * (settings.elapsed_time+1000.0));
+//            let phase1 = (waveNumber * (p         )) - ((dispersionRelation(waveNumber) * (settings.elapsed_time*10.0)));
+//            let phase2 = (waveNumber * (p - period)) - ((dispersionRelation(waveNumber) * (settings.elapsed_time*10.0)));
+//            let phase1 = (waveNumber * (p         )) - (dispersionRelation(waveNumber) * ((settings.elapsed_time)));
+//            let phase2 = (waveNumber * (p - period)) - (dispersionRelation(waveNumber) * ((settings.elapsed_time)));
 
             let weight1 = p / period;
             let weight2 = 1 - weight1;
-            result += dx * waveLength * spectrum(zeta, 10.0) *
+            result += dx * waveLength * spectrum(zeta, WIND_SPEED) *
                    (cubic_bump(weight1) * gerstner_wave(phase1, waveNumber) +
                     cubic_bump(weight2) * gerstner_wave(phase2, waveNumber));
 

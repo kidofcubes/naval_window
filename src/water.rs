@@ -103,6 +103,7 @@ fn setup(
             base_color: Color::srgb(0.003, 0.008, 0.015),
             opaque_render_method: OpaqueRendererMethod::Deferred,
             perceptual_roughness: 0.25,
+            // perceptual_roughness: 0.1,
             reflectance: 0.4,
             metallic: 0.0,
             alpha_mode: AlphaMode::Opaque,

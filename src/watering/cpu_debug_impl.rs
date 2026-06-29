@@ -762,7 +762,8 @@ pub fn build_profile(profile_out: &mut ProfileBuffer, settings: &WaterSettings) 
                 // let zeta = max_zeta;
 
 
-                let period = PERIODICITY * 2.0f32.powf(mid_zeta);
+                // let period = PERIODICITY * 2.0f32.powf(mid_zeta);
+                let period = PERIODICITY * 2.0f32.powf(max_zeta);
                 // let period = PERIODICITY * 2.0f32.powf(zeta);
                 let p = (profile_index as f32 * period) / PROFILE_BUFFER_LENGTH as f32;
 

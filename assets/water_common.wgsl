@@ -14,7 +14,8 @@ const GRID_Z_SIZE: u32 = 256u;
 //const GRID_Z_SIZE: u32 = 256u;
 
 //const GRID_SCALE: f32 = 10.0;
-const GRID_SCALE: f32 = 1.0;
+//const GRID_SCALE: f32 = 1.0;
+const GRID_SCALE: f32 = 2.0;
 //const GRID_SCALE: f32 = 0.25;
 
 //const RENDER_X_SIZE: u32 = 64u;
@@ -31,7 +32,8 @@ const PROFILE_BUFFER_LENGTH: u32 = 512u;
 // Wave parameters
 const PERIODICITY: f32 = 2.0;
 const ZETA_MIN: f32 = -2.0;
-const ZETA_MAX: f32 = 3.3;
+const ZETA_MAX: f32 = 4.6;
+const WIND_SPEED: f32 = 5.0;
 //const ZETA_MAX: f32 = -3.0;
 //const WAVE_NUMBERS = array<f32, 1>(1.0);
 //const DIRECTIONAL_OFFSETS = array<f32, 64>(
@@ -243,7 +245,7 @@ struct PreComputedWaveData {
 
 // Helper functions
 fn index_to_radians(i: u32) -> f32 {
-    return (f32(i)+0.5) * (TAU / f32(DIRECTIONS));
+    return (f32(i)+0.0) * (TAU / f32(DIRECTIONS));
 }
 
 fn layer_index(theta_index: u32, zeta_index: u32) -> i32 {

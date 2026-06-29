@@ -33,8 +33,11 @@ fn get_offset_for_position(
     let dir = vec3<f32>(cos(theta), 0.0, sin(theta));
 
     let zeta_full_range = ZETA_MAX - ZETA_MIN;
+    let min_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 0.0) / f32(TOTAL_ZETA_NUMBERS)));
     let mid_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 0.5) / f32(TOTAL_ZETA_NUMBERS)));
-    let period = PERIODICITY * pow(2.0, mid_zeta);
+    let max_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 1.0) / f32(TOTAL_ZETA_NUMBERS)));
+
+    let period = PERIODICITY * pow(2.0, max_zeta);
 
     let position_offset = dot(grid_pos, vec2<f32>(dir.x, dir.z));
     let profile_coord = position_offset + DIRECTIONAL_OFFSETS[theta_index];
@@ -149,8 +152,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 //        amplitude = orig_amplitude + vec2(1.0,0.0);
         let difference = ((pre_computed_wave_data.jonswap_spectrum_amplitudes[layer].x) - orig_length);
 //        let difference = 0.0;
-//        amplitude = orig_amplitude + (normalized_amplitude * max(0.0, difference * relax_constant));
-        amplitude = (normalized_amplitude * pre_computed_wave_data.jonswap_spectrum_amplitudes[layer].x);
+        amplitude = orig_amplitude + (normalized_amplitude * max(0.0, difference * relax_constant));
+//        if(theta_index >= (32 - 3) || (theta_index >= 0 && theta_index < 3)){
+//            amplitude = (normalized_amplitude * pre_computed_wave_data.jonswap_spectrum_amplitudes[layer].x)*5.0;
+//        }
 //        amplitude = orig_amplitude + (normalized_amplitude * max(0.0, (10.0 - orig_length) / relax_constant));
 //        amplitude = orig_amplitude + (normalized_amplitude * 0.0000000000000001);
 //        amplitude = vec2(10.0,0.0);

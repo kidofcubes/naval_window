@@ -212,7 +212,7 @@ pub const GRID_Z_SIZE: usize = 256;
 // pub const GRID_Z_SIZE: usize = 128;
 // pub const GRID_X_SIZE: usize = 64;
 // pub const GRID_Z_SIZE: usize = 64;
-pub const GRID_SCALE: f32 = 1.0; //how many meters each grid cell represents
+pub const GRID_SCALE: f32 = 2.0; //how many meters each grid cell represents
 
 // pub const DIRECTIONS: usize = 1;
 pub const DIRECTIONS: usize = 32;
@@ -220,9 +220,9 @@ pub const DIRECTIONS: usize = 32;
 // pub const TOTAL_ZETA_NUMBERS: usize = 1;
 pub const TOTAL_ZETA_NUMBERS: usize = 4;
 pub const MIN_ZETA: f32 = -2.0;
-pub const MAX_ZETA: f32 = 3.3;
+pub const MAX_ZETA: f32 = 4.6;
 // pub const MAX_ZETA: f32 = -3.0;
-pub const WIND_SPEED: f32 = 10.0;
+pub const WIND_SPEED: f32 = 5.0;
 const GRAVITY: f32 = 9.81;
 
 

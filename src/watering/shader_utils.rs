@@ -1,4 +1,4 @@
-use std::f32::consts::TAU;
+use std::f32::consts::{PI, TAU};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
     encase, AddressMode, Extent3d, FilterMode, Sampler, SamplerDescriptor, ShaderType,
@@ -7,7 +7,7 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::RenderDevice;
 use encase::internal::WriteInto;
 use crate::big_watering::OceanConfig;
-use crate::watering::{DIRECTIONS, GRID_X_SIZE, GRID_Z_SIZE, MAX_ZETA, MIN_ZETA, PROFILE_BUFFER_LENGTH, TOTAL_ZETA_NUMBERS, WIND_SPEED};
+use crate::watering::{DIRECTIONS, GRID_SCALE, GRID_X_SIZE, GRID_Z_SIZE, MAX_ZETA, MIN_ZETA, PROFILE_BUFFER_LENGTH, TOTAL_ZETA_NUMBERS, WIND_SPEED};
 use crate::watering::cpu_debug_impl::CpuDebugWateringResources;
 // ─── Texture / sampler factories ────────────────────────────────────────────
 
@@ -84,13 +84,17 @@ pub fn encode_uniform<T: ShaderType + WriteInto>(data: &T) -> Vec<u8> {
 pub fn precompute_jonswap_spectrum_amplitudes(
     min_zeta: f32, max_zeta: f32, dir_count: usize, zeta_count: usize, integration_steps: usize
 ) -> Vec<f32> {
-    let zeta_full_range = MAX_ZETA - MIN_ZETA;
-    let mut ocean_config = OceanConfig {
-        grid_size: 2048,
-        patch_length: 256.0,
+    let zeta_full_range = max_zeta - min_zeta;
+    let wind_dir_angle = (-0.40 * PI)+(((-2.0)/DIRECTIONS as f32)*TAU);
+    let wind_dir = Vec2::new(f32::cos(wind_dir_angle), f32::sin(wind_dir_angle)).normalize();
+    let ocean_config = OceanConfig {
+        grid_size: GRID_X_SIZE,
+        patch_length: GRID_SCALE*GRID_X_SIZE as f32,
         wind_speed: WIND_SPEED,
-        wind_dir: Vec2::new(1.0, 1.0).normalize(),
-        amplitude: 1000_0000.0,
+        // wind_dir: Vec2::new(1.0, 1.0).normalize(),
+        wind_dir: wind_dir,
+        // wind_dir: Vec2::new(-1.0, 1.0).normalize(),
+        amplitude: 1000.0,
         gravity: 9.81,
         fetch: 1000_000.0,
         gamma: 3.3,
@@ -104,17 +108,10 @@ pub fn precompute_jonswap_spectrum_amplitudes(
         let dir = vec3(f32::cos(theta), 0.0, f32::sin(theta));
 
 
-        for zeta_index in 0..TOTAL_ZETA_NUMBERS {
-            let min_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) - 0.0) / (TOTAL_ZETA_NUMBERS as f32)));
-            let max_zeta = MIN_ZETA + (zeta_full_range * (((zeta_index as f32) + 1.0) / (TOTAL_ZETA_NUMBERS as f32)));
-            let mid_zeta = MIN_ZETA + (zeta_full_range * ((zeta_index as f32 + 0.5) / TOTAL_ZETA_NUMBERS as f32));
-
-
-            let dx = (max_zeta - min_zeta) / integration_steps as f32;
-
-            let layer = crate::utils::layer_index(theta_index, zeta_index);
-
-            let mut result: f32 = 0.0;
+        for zeta_index in 0..zeta_count {
+            let min_zeta = min_zeta + (zeta_full_range * (((zeta_index as f32) - 0.0) / (zeta_count as f32)));
+            let max_zeta = min_zeta + (zeta_full_range * (((zeta_index as f32) + 1.0) / (zeta_count as f32)));
+            let mid_zeta = min_zeta + (zeta_full_range * (((zeta_index as f32) + 0.5) / (zeta_count as f32)));
 
             let result = integrate(min_zeta, max_zeta, |zeta| {
                 let wave_length = 2.0f32.powf(zeta);
