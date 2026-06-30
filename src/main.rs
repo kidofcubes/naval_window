@@ -2,6 +2,7 @@ mod cam_movement;
 mod water;
 mod voxelize;
 mod watering;
+mod fftwaves;
 mod mesh_optimize;
 mod big_watering;
 mod utils;
@@ -27,6 +28,7 @@ use crate::voxelize::{null_texture, render_sdf, render_voxel_grid, voxelize_mesh
 use crate::cam_movement::CameraMovementPlugin;
 use crate::mesh_optimize::{combine_meshes, get_boundary_mesh_conservative, simplify_mesh};
 use crate::big_watering::BigWatering;
+use crate::fftwaves::FftWavesPlugin;
 use crate::water::{CustomMaterial, WaterPlugin};
 
 
@@ -461,6 +463,7 @@ fn main() {
                 init_paths: data_paths.unwrap(),
             },
             WireframePlugin::default(),
+            FftWavesPlugin,
             WaterPlugin,
             CameraMovementPlugin,
             MeshPickingPlugin,

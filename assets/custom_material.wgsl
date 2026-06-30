@@ -58,6 +58,14 @@ const COLOR_MULTIPLIER: vec4<f32> = vec4<f32>(1.0, 1.0, 1.0, 0.5);
 @group(#{MATERIAL_BIND_GROUP}) @binding(110) var amplitude_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var profile_buffer:     texture_2d<f32>;
 
+// FFT-based far-field wave field. Tiled at multiple physical scales (cascades).
+const FFT_CASCADE_COUNT: u32 = 4u;
+@group(#{MATERIAL_BIND_GROUP}) @binding(112) var fft_displacement: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(113) var fft_slope:        texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(114) var fft_sampler:      sampler;
+// xyzw per cascade = (patch_length, k_min, k_max, _pad)
+@group(#{MATERIAL_BIND_GROUP}) @binding(115) var<uniform> fft_cascade_params: array<vec4<f32>, FFT_CASCADE_COUNT>;
+
 
 fn modulo_f32(x: f32, n: f32) -> f32{
     return x - floor(x / n) * n;
@@ -93,13 +101,39 @@ struct WaterSurface {
     normal: vec3<f32>,
 }
 
+// Sum the displacement and slope of every FFT cascade at this world XZ.
+// Cascades tile at different physical scales so no global repeat is visible.
+fn sample_fft_surface(world_xz: vec2<f32>) -> WaterSurface {
+    var total_offset = vec3<f32>(0.0, 0.0, 0.0);
+    var total_slope  = vec2<f32>(0.0, 0.0);
+
+    for (var c: u32 = 0u; c < FFT_CASCADE_COUNT; c = c + 1u) {
+        let patch = fft_cascade_params[c].x;
+        let uv = fract(world_xz / patch + vec2<f32>(0.5));
+        let disp  = textureSampleLevel(fft_displacement, fft_sampler, uv, c, 0.0);
+        let slope = textureSampleLevel(fft_slope,        fft_sampler, uv, c, 0.0);
+        total_offset += vec3<f32>(disp.x, disp.y, disp.z);
+        total_slope  += vec2<f32>(slope.x, slope.y);
+    }
+
+    var result: WaterSurface;
+    result.offset = total_offset;
+    result.normal = normalize(vec3<f32>(-total_slope.x, 1.0, -total_slope.y));
+    return result;
+}
+
 fn calculate_water_surface(uv: vec2<f32>) -> WaterSurface {
     var result: WaterSurface;
     result.offset = vec3<f32>(0.0, 0.0, 0.0);
     result.normal = vec3<f32>(0.0, 1.0, 0.0);
 
     if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0){
-        return result;
+        // Outside the realwaves grid → fall back to the tiled FFT cascades.
+        let world_xz = vec2<f32>(
+            (uv.x - 0.5) * f32(GRID_X_SIZE) * f32(GRID_SCALE),
+            (uv.y - 0.5) * f32(GRID_Z_SIZE) * f32(GRID_SCALE),
+        );
+        return sample_fft_surface(world_xz);
     }
 
     // Map UV coordinates to grid coordinates

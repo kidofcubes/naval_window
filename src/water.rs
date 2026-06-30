@@ -14,6 +14,7 @@ use crate::{watering, BuildData};
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
 use crate::watering::{VoxelSettings, Watering, WaterPingPong, GpuTexture, GpuTextures};
 use crate::watering::water_lod::WaterLodPlugin;
+use crate::fftwaves::{FftCascadesUniform, FftTexture, FftTextures, FFT_CASCADE_COUNT};
 
 const SHADER_ASSET_PATH: &str = "custom_material.wgsl";
 
@@ -30,7 +31,7 @@ impl Plugin for WaterPlugin {
 
         app.add_plugins(Watering);
         app.add_plugins(WaterLodPlugin {});
-        app.add_systems(Startup, setup.after(watering::setup_textures));
+        app.add_systems(Startup, setup.after(watering::setup_textures).after(crate::fftwaves::setup_textures));
         app.add_systems(Update, update);
     }
 }
@@ -45,6 +46,8 @@ fn setup(
     mut extended_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, CustomMaterial>>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     water_textures: Res<GpuTextures>,
+    fft_textures: Res<FftTextures>,
+    fft_cascades: Res<FftCascadesUniform>,
     asset_server: Res<AssetServer>,
 ) {
     println!("SETUPING");
@@ -94,6 +97,9 @@ fn setup(
         voxel_grid: null_texture(images.as_mut(), TextureDimension::D3, TextureFormat::R8Uint),
         amplitude_texture: water_textures.get(GpuTexture::AmplitudeA).cloned().expect("AmplitudeA texture not initialized"),
         profile_buffer: water_textures.get(GpuTexture::Profile).cloned().expect("Profile texture not initialized"),
+        fft_displacement: fft_textures.get(FftTexture::Displacement).cloned().expect("Fft Displacement texture not initialized"),
+        fft_slope: fft_textures.get(FftTexture::Slope).cloned().expect("Fft Slope texture not initialized"),
+        fft_cascade_params: fft_cascades.cascades,
     };
 
     let material = ExtendedMaterial {
@@ -104,7 +110,7 @@ fn setup(
             opaque_render_method: OpaqueRendererMethod::Deferred,
             perceptual_roughness: 0.25,
             // perceptual_roughness: 0.1,
-            reflectance: 0.4,
+            reflectance: 0.25,
             metallic: 0.0,
             alpha_mode: AlphaMode::Opaque,
             ..default()
@@ -180,9 +186,20 @@ pub struct CustomMaterial {
     #[texture(109, dimension = "2d_array", sample_type = "float")]
     #[sampler(110)]
     amplitude_texture: Handle<Image>,
-    
+
     #[texture(111, dimension = "2d", sample_type = "float")]
     profile_buffer: Handle<Image>,
+
+    // FFT-based far-field wave field.
+    #[texture(112, dimension = "2d_array", sample_type = "float")]
+    #[sampler(114)]
+    fft_displacement: Handle<Image>,
+
+    #[texture(113, dimension = "2d_array", sample_type = "float")]
+    fft_slope: Handle<Image>,
+
+    #[uniform(115)]
+    fft_cascade_params: [Vec4; FFT_CASCADE_COUNT],
 }
 
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.
