@@ -128,7 +128,7 @@ fn calculate_water_surface(uv: vec2<f32>) -> WaterSurface {
     result.offset = vec3<f32>(0.0, 0.0, 0.0);
     result.normal = vec3<f32>(0.0, 1.0, 0.0);
 
-    if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0){
+    if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || true){
         // Outside the realwaves grid → fall back to the tiled FFT cascades.
         let world_xz = vec2<f32>(
             (uv.x - 0.5) * f32(GRID_X_SIZE) * f32(GRID_SCALE),

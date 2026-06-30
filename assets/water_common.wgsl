@@ -220,8 +220,8 @@ struct WaterSettings {
     elapsed_time: f32,
     zeta_min: f32,
     zeta_max: f32,
-    _pad0: f32,
-    _pad1: f32,
+    _padding_a: f32,
+    _padding_b: f32,
 }
 
 struct WaterDebugSettings {
