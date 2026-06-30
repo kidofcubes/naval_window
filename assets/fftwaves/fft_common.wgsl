@@ -1,7 +1,7 @@
 // Shared constants & helpers for the FFT-based ocean wave cascade.
 
-const FFT_GRID_SIZE: u32 = 256u;
-const FFT_GRID_SIZE_LOG2: u32 = 8u;
+const FFT_GRID_SIZE: u32 = 512u;
+const FFT_GRID_SIZE_LOG2: u32 = 9u;
 const FFT_CASCADE_COUNT: u32 = 4u;
 
 // Spectra packed into a single 2D-array texture: layer = spectrum * C + cascade.
@@ -21,12 +21,12 @@ const TAU: f32 = 6.283185307179586;
 const GRAVITY: f32 = 9.81;
 
 // JONSWAP parameters (mirror big_watering::OceanConfig defaults)
-const WIND_SPEED: f32 = 10.0;
-const WIND_DIR_X: f32 = 1.0;
-const WIND_DIR_Z: f32 = 0.0;
+const WIND_SPEED: f32 = 5.0;
+const WIND_DIR_X: f32 = 0.707;
+const WIND_DIR_Z: f32 = 0.707;
 const FETCH: f32 = 100000.0;
 const GAMMA: f32 = 3.3;
-const AMPLITUDE: f32 = 0.5;
+const AMPLITUDE: f32 = 0.05;
 
 struct FftSettings {
     elapsed_time: f32,

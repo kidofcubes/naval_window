@@ -32,7 +32,7 @@ impl Default for OceanConfig {
         Self {
             grid_size: 128,
             patch_length: 32.0,
-            wind_speed: 10.0,
+            wind_speed: 5.0,
             wind_dir: Vec2::new(1.0, 0.0).normalize(),
             amplitude: 0.5,
             gravity: 9.81,

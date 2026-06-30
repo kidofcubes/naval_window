@@ -9,18 +9,27 @@ use bevy::render::render_resource::{Extent3d, ShaderType, TextureFormat};
 use bevy::render::{Render, RenderApp, RenderSystems};
 use crate::watering::shader_utils::make_storage_image;
 
-pub const FFT_GRID_SIZE: usize = 256;
+pub const FFT_GRID_SIZE: usize = 512;
 pub const FFT_CASCADE_COUNT: usize = 4;
 pub const FFT_SPECTRUM_COUNT: usize = 5;
 
 /// (patch_length_m, k_min, k_max, _pad). One per cascade.
-/// k_min/k_max windows the spectrum so neighboring cascades don't
-/// double-count energy.
+///
+/// Patches are non-power-of-2 / coprime-ish so their periods don't sync
+/// (LCM is in the millions of meters, way past visible range). Each cascade
+/// owns wavenumbers from 2π / its-own-patch up to 2π / next-smaller-patch,
+/// which is the natural Nyquist-like boundary that keeps any single k-bin
+/// from being represented by more than one cascade.
+///   997 m → k ∈ [0,         2π/251 ≈ 0.025]   long ocean swell
+///   251 m → k ∈ [2π/251,    2π/53  ≈ 0.119]   ship-scale waves (JONSWAP peak ~ 0.10)
+///    53 m → k ∈ [2π/53,     2π/13  ≈ 0.483]   wind chop
+///    13 m → k ∈ [2π/13,     ∞              ]   ripples
 pub const FFT_CASCADES: [Vec4; FFT_CASCADE_COUNT] = [
-    Vec4::new(1024.0, 0.0,  0.05, 0.0),
-    Vec4::new( 256.0, 0.05, 0.25, 0.0),
-    Vec4::new(  64.0, 0.25, 1.0,  0.0),
-    Vec4::new(  16.0, 1.0,  100.0, 0.0),
+    Vec4::new(37.0, 0.0,   0.025,  0.0),
+    Vec4::new(1021.0, 0.025,  0.119,  0.0),
+    Vec4::new( 571.0, 0.119,  0.483,  0.0),
+    Vec4::new( 127.0, 0.119,  0.483,  0.0),
+    // Vec4::new( 127.0, 0.483,  100.0,  0.0),
 ];
 
 pub struct FftWavesPlugin;
