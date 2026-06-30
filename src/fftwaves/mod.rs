@@ -25,11 +25,11 @@ pub const FFT_SPECTRUM_COUNT: usize = 5;
 ///    53 m → k ∈ [2π/53,     2π/13  ≈ 0.483]   wind chop
 ///    13 m → k ∈ [2π/13,     ∞              ]   ripples
 pub const FFT_CASCADES: [Vec4; FFT_CASCADE_COUNT] = [
-    Vec4::new(37.0, 0.0,   0.025,  0.0),
-    Vec4::new(1021.0, 0.025,  0.119,  0.0),
-    Vec4::new( 571.0, 0.119,  0.483,  0.0),
-    Vec4::new( 127.0, 0.119,  0.483,  0.0),
-    // Vec4::new( 127.0, 0.483,  100.0,  0.0),
+    Vec4::new(727.0, 0.0,   0.025,  0.0),
+    Vec4::new(547.0, 0.025,  0.119,  0.0),
+    Vec4::new( 373.0, 0.119,  0.483,  0.0),
+    // Vec4::new( .0, 0.119,  0.483,  0.0),
+    Vec4::new( 16.0, 0.483,  10.0,  0.0),
 ];
 
 pub struct FftWavesPlugin;

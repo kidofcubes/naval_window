@@ -31,7 +31,7 @@ const PROFILE_BUFFER_LENGTH: u32 = 512u;
 
 // Wave parameters
 const PERIODICITY: f32 = 2.0;
-const ZETA_MIN: f32 = -2.0;
+const ZETA_MIN: f32 = -3.0;
 const ZETA_MAX: f32 = 4.6;
 const WIND_SPEED: f32 = 5.0;
 //const ZETA_MAX: f32 = -3.0;
