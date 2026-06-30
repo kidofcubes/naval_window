@@ -21,6 +21,7 @@ fn sample_h0(row: u32, col: u32, cascade: u32) -> vec2<f32> {
     let patch_unreserved_keyword = params.x;
     let k_min = params.y;
     let k_max = params.z;
+    let cascade_amp = params.w;
 
     let k = k_for_cell(row, col, patch_unreserved_keyword);
     let k_len = length(k);
@@ -28,7 +29,7 @@ fn sample_h0(row: u32, col: u32, cascade: u32) -> vec2<f32> {
         return vec2<f32>(0.0, 0.0);
     }
     let s = jonswap_spectrum(k.x, k.y, spectrum);
-    let scale = sqrt(s) * 0.7071067811865475; // 1/sqrt(2)
+    let scale = sqrt(s) * 0.7071067811865475 * cascade_amp; // 1/sqrt(2)
 
     let noise = gaussian2(
         hash3(row, col,  cascade * 2u      + FFT_PRNG_SALT),

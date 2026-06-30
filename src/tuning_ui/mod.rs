@@ -77,7 +77,7 @@ fn draw_tuning_panel(
             egui::CollapsingHeader::new("FFT cascades")
                 .default_open(true)
                 .show(ui, |ui| {
-                    ui.label("Each row: (patch length, k_min, k_max)");
+                    ui.label("Each row: (patch length, k_min, k_max, amplitude)");
                     for c in 0..FFT_CASCADE_COUNT {
                         ui.separator();
                         ui.label(format!("Cascade {}", c));
@@ -96,6 +96,10 @@ fn draw_tuning_panel(
                             egui::Slider::new(&mut v.z, 0.001..=100.0)
                                 .text("k_max")
                                 .logarithmic(true),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut v.w, 0.0..=10.0)
+                                .text("amplitude"),
                         );
                     }
                 });

@@ -13,7 +13,9 @@ pub const FFT_GRID_SIZE: usize = 512;
 pub const FFT_CASCADE_COUNT: usize = 4;
 pub const FFT_SPECTRUM_COUNT: usize = 5;
 
-/// (patch_length_m, k_min, k_max, _pad). One per cascade.
+/// (patch_length_m, k_min, k_max, amplitude_multiplier). One per cascade.
+/// `amplitude_multiplier` scales this cascade's h0 amplitude (1.0 = JONSWAP
+/// natural amplitude; per-cascade slider in the egui panel).
 ///
 /// Patches are non-power-of-2 / coprime-ish so their periods don't sync
 /// (LCM is in the millions of meters, way past visible range). Each cascade
@@ -25,11 +27,10 @@ pub const FFT_SPECTRUM_COUNT: usize = 5;
 ///    53 m → k ∈ [2π/53,     2π/13  ≈ 0.483]   wind chop
 ///    13 m → k ∈ [2π/13,     ∞              ]   ripples
 pub const FFT_CASCADES: [Vec4; FFT_CASCADE_COUNT] = [
-    Vec4::new(727.0, 0.0,   0.025,  0.0),
-    Vec4::new(547.0, 0.025,  0.119,  0.0),
-    Vec4::new( 373.0, 0.119,  0.483,  0.0),
-    // Vec4::new( .0, 0.119,  0.483,  0.0),
-    Vec4::new( 16.0, 0.483,  10.0,  0.0),
+    Vec4::new(727.0, 0.0,    0.025, 1.0),
+    Vec4::new(547.0, 0.025,  0.119, 1.0),
+    Vec4::new(373.0, 0.119,  0.483, 1.0),
+    Vec4::new( 16.0, 0.483, 10.0,   1.0),
 ];
 
 pub struct FftWavesPlugin;
