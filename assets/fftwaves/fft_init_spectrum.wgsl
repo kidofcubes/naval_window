@@ -17,11 +17,11 @@ const FFT_PRNG_SALT: u32 = 0xC0FFEE17u;
 
 fn sample_h0(row: u32, col: u32, cascade: u32) -> vec2<f32> {
     let params = cascades.cascades[cascade];
-    let patch = params.x;
+    let patch_unreserved_keyword = params.x;
     let k_min = params.y;
     let k_max = params.z;
 
-    let k = k_for_cell(row, col, patch);
+    let k = k_for_cell(row, col, patch_unreserved_keyword);
     let k_len = length(k);
     if (k_len < k_min || k_len > k_max) {
         return vec2<f32>(0.0, 0.0);
@@ -58,8 +58,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureStore(h0_out,      coord, layer, vec4<f32>(h0.x,      h0.y,      0.0, 0.0));
     textureStore(h0_conj_out, coord, layer, vec4<f32>(h0_conj.x, h0_conj.y, 0.0, 0.0));
 
-    let patch = cascades.cascades[cascade].x;
-    let k = k_for_cell(row, col, patch);
+    let patch_unreserved_keyword = cascades.cascades[cascade].x;
+    let k = k_for_cell(row, col, patch_unreserved_keyword);
     let k_len = length(k);
     let omega = sqrt(GRAVITY * k_len);
     textureStore(omega_out, coord, layer, vec4<f32>(omega, 0.0, 0.0, 0.0));

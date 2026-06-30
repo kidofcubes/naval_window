@@ -30,9 +30,9 @@ const AMPLITUDE: f32 = 0.5;
 
 struct FftSettings {
     elapsed_time: f32,
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    _padding_a: f32,
+    _padding_b: f32,
+    _padding_c: f32,
 }
 
 // One per cascade. xyzw = (patch_length, k_min, k_max, _pad)

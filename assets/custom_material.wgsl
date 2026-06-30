@@ -108,8 +108,8 @@ fn sample_fft_surface(world_xz: vec2<f32>) -> WaterSurface {
     var total_slope  = vec2<f32>(0.0, 0.0);
 
     for (var c: u32 = 0u; c < FFT_CASCADE_COUNT; c = c + 1u) {
-        let patch = fft_cascade_params[c].x;
-        let uv = fract(world_xz / patch + vec2<f32>(0.5));
+        let patch_unreserved_keyword = fft_cascade_params[c].x;
+        let uv = fract(world_xz / patch_unreserved_keyword + vec2<f32>(0.5));
         let disp  = textureSampleLevel(fft_displacement, fft_sampler, uv, c, 0.0);
         let slope = textureSampleLevel(fft_slope,        fft_sampler, uv, c, 0.0);
         total_offset += vec3<f32>(disp.x, disp.y, disp.z);

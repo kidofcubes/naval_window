@@ -36,8 +36,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let h = cmul(h0, exp_pos) + cmul(h0_conj, exp_neg);
 
-    let patch = cascades.cascades[cascade].x;
-    let k = k_for_cell(row, col, patch);
+    let patch_unreserved_keyword = cascades.cascades[cascade].x;
+    let k = k_for_cell(row, col, patch_unreserved_keyword);
     let k_len = length(k);
 
     var dx = vec2<f32>(0.0, 0.0);
