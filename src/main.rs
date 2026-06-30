@@ -7,7 +7,7 @@ mod mesh_optimize;
 mod big_watering;
 mod utils;
 
-use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, render::{settings::{RenderCreation, WgpuFeatures, WgpuSettings}, RenderPlugin}, window::WindowResolution};
+use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, render::{settings::{RenderCreation, WgpuFeatures, WgpuLimits, WgpuSettings}, RenderPlugin}, window::WindowResolution};
 use std::{env, path::{Path, PathBuf}};
 use std::ops::{Deref, DerefMut};
 use bevy::asset::UnapprovedPathMode;
@@ -404,6 +404,11 @@ fn main() {
         render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
             // WARN this is a native only feature. It will not work with webgl or webgpu
             // features: WgpuFeatures::POLYGON_MODE_LINE,
+            limits: WgpuLimits {
+                max_compute_invocations_per_workgroup: 1024,
+                max_compute_workgroup_size_x: 1024,
+                ..default()
+            },
             ..default()
         })),
         ..default()

@@ -12,11 +12,13 @@
 
 var<workgroup> sm: array<vec2<f32>, FFT_GRID_SIZE>;
 
-fn bit_reverse_8(x: u32) -> u32 {
-    var v = x;
-    v = ((v & 0xAAu) >> 1u) | ((v & 0x55u) << 1u);
-    v = ((v & 0xCCu) >> 2u) | ((v & 0x33u) << 2u);
-    v = ((v & 0xF0u) >> 4u) | ((v & 0x0Fu) << 4u);
+fn bit_reverse_n(x: u32) -> u32 {
+    var v: u32 = 0u;
+    var t: u32 = x;
+    for (var i: u32 = 0u; i < FFT_GRID_SIZE_LOG2; i = i + 1u) {
+        v = (v << 1u) | (t & 1u);
+        t = t >> 1u;
+    }
     return v;
 }
 
@@ -32,7 +34,7 @@ fn main(
     let tid = lid.x;
 
     // Load: column index = col, row index = tid (the FFT axis).
-    let br = bit_reverse_8(tid);
+    let br = bit_reverse_n(tid);
     let coord_in = vec2<i32>(i32(col), i32(tid));
     sm[br] = textureLoad(spectra_in, coord_in, layer).xy;
     workgroupBarrier();
