@@ -31,8 +31,7 @@ const PROFILE_BUFFER_LENGTH: u32 = 512u;
 
 // Wave parameters
 const PERIODICITY: f32 = 2.0;
-const ZETA_MIN: f32 = -3.0;
-const ZETA_MAX: f32 = 4.6;
+// ZETA_MIN / ZETA_MAX are now uniform-driven (WaterSettings.zeta_min / zeta_max).
 const WIND_SPEED: f32 = 5.0;
 //const ZETA_MAX: f32 = -3.0;
 //const WAVE_NUMBERS = array<f32, 1>(1.0);
@@ -219,6 +218,10 @@ struct WaterSettings {
     time_scale: f32,
     delta_time: f32,
     elapsed_time: f32,
+    zeta_min: f32,
+    zeta_max: f32,
+    _pad0: f32,
+    _pad1: f32,
 }
 
 struct WaterDebugSettings {

@@ -39,11 +39,13 @@ impl Plugin for FftWavesPlugin {
         app
             .insert_resource(FftSettings { elapsed_time: 0.0, _pad0: 0.0, _pad1: 0.0, _pad2: 0.0 })
             .insert_resource(FftCascadesUniform { cascades: FFT_CASCADES })
+            .insert_resource(FftSpectrumParams::default())
             .insert_resource(FftTextures::default())
             .add_systems(Startup, setup_textures)
             .add_systems(Update, tick_time)
             .add_plugins(ExtractResourcePlugin::<FftSettings>::default())
             .add_plugins(ExtractResourcePlugin::<FftCascadesUniform>::default())
+            .add_plugins(ExtractResourcePlugin::<FftSpectrumParams>::default())
             .add_plugins(ExtractResourcePlugin::<FftTextures>::default());
 
         let render_app = app.sub_app_mut(RenderApp);
@@ -98,6 +100,33 @@ pub struct FftSettings {
 #[derive(Resource, ExtractResource, Clone, ShaderType)]
 pub struct FftCascadesUniform {
     pub cascades: [Vec4; FFT_CASCADE_COUNT],
+}
+
+#[derive(Resource, ExtractResource, Clone, ShaderType)]
+pub struct FftSpectrumParams {
+    pub wind_speed: f32,
+    pub wind_dir_x: f32,
+    pub wind_dir_z: f32,
+    pub fetch: f32,
+    pub gamma: f32,
+    pub amplitude: f32,
+    pub _pad0: f32,
+    pub _pad1: f32,
+}
+
+impl Default for FftSpectrumParams {
+    fn default() -> Self {
+        Self {
+            wind_speed: 5.0,
+            wind_dir_x: 0.707,
+            wind_dir_z: 0.707,
+            fetch: 100000.0,
+            gamma: 3.3,
+            amplitude: 0.05,
+            _pad0: 0.0,
+            _pad1: 0.0,
+        }
+    }
 }
 
 pub fn setup_textures(mut commands: Commands, mut images: ResMut<Assets<Image>>) {

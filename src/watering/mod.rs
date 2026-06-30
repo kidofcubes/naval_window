@@ -23,6 +23,10 @@ impl Plugin for Watering{
                 time_scale: 3.0,
                 delta_time: 0.0,
                 elapsed_time: 0.0,
+                zeta_min: -3.0,
+                zeta_max: 4.6,
+                _pad0: 0.0,
+                _pad1: 0.0,
             })
             .insert_resource(WaterDebugSettings {
                 spawn_center_x: GRID_X_SIZE as f32 / 2.0,
@@ -230,12 +234,16 @@ const GRAVITY: f32 = 9.81;
 pub const PROFILE_BUFFER_LENGTH: usize = 4096;
 
 //to be put in main world
-#[derive(Resource, ExtractResource, Clone, ShaderType)]
+#[derive(Resource, ExtractResource, Clone, Debug, ShaderType)]
 pub struct WaterSettings {
     pub height_scale: f32,
     pub time_scale: f32,
     pub delta_time: f32,
     pub elapsed_time: f32,
+    pub zeta_min: f32,
+    pub zeta_max: f32,
+    pub _pad0: f32,
+    pub _pad1: f32,
 }
 
 /// Keys for every `Handle<Image>` the watering pipeline owns.

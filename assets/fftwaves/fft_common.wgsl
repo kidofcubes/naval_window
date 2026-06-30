@@ -20,13 +20,17 @@ const PI: f32 = 3.141592653589793;
 const TAU: f32 = 6.283185307179586;
 const GRAVITY: f32 = 9.81;
 
-// JONSWAP parameters (mirror big_watering::OceanConfig defaults)
-const WIND_SPEED: f32 = 5.0;
-const WIND_DIR_X: f32 = 0.707;
-const WIND_DIR_Z: f32 = 0.707;
-const FETCH: f32 = 100000.0;
-const GAMMA: f32 = 3.3;
-const AMPLITUDE: f32 = 0.05;
+// JONSWAP parameters — runtime tunable via FftSpectrumParams uniform.
+struct FftSpectrumParams {
+    wind_speed: f32,
+    wind_dir_x: f32,
+    wind_dir_z: f32,
+    fetch: f32,
+    gamma: f32,
+    amplitude: f32,
+    _pad0: f32,
+    _pad1: f32,
+}
 
 struct FftSettings {
     elapsed_time: f32,
@@ -94,7 +98,7 @@ fn gaussian2(seed_a: u32, seed_b: u32) -> vec2<f32> {
 }
 
 // JONSWAP spectrum (port of big_watering::jonswap_spectrum)
-fn jonswap_spectrum(kx: f32, kz: f32) -> f32 {
+fn jonswap_spectrum(kx: f32, kz: f32, params: FftSpectrumParams) -> f32 {
     let wave_number = sqrt(kx * kx + kz * kz);
     if (wave_number < 1e-8) {
         return 0.0;
@@ -103,7 +107,7 @@ fn jonswap_spectrum(kx: f32, kz: f32) -> f32 {
     if (omega < 1e-8) {
         return 0.0;
     }
-    let omega_peak = 22.0 * pow(GRAVITY * GRAVITY / (WIND_SPEED * FETCH), 1.0 / 3.0);
+    let omega_peak = 22.0 * pow(GRAVITY * GRAVITY / (params.wind_speed * params.fetch), 1.0 / 3.0);
 
     let alpha = 0.0081;
     let omega_ratio = omega_peak / omega;
@@ -112,17 +116,17 @@ fn jonswap_spectrum(kx: f32, kz: f32) -> f32 {
 
     let sigma = select(0.09, 0.07, omega <= omega_peak);
     let exponent_arg = pow(omega - omega_peak, 2.0) / (2.0 * sigma * sigma * omega_peak * omega_peak);
-    let gamma_factor = pow(GAMMA, exp(-exponent_arg));
+    let gamma_factor = pow(params.gamma, exp(-exponent_arg));
     let jonswap = pm * gamma_factor;
 
     let d_omega_dk = GRAVITY / (2.0 * omega);
     let spectrum_k = jonswap * d_omega_dk / TAU;
 
     let wave_dir = vec2<f32>(kx, kz) / wave_number;
-    let cos_theta = wave_dir.x * WIND_DIR_X + wave_dir.y * WIND_DIR_Z;
+    let cos_theta = wave_dir.x * params.wind_dir_x + wave_dir.y * params.wind_dir_z;
     let directional = select(0.0, cos_theta * cos_theta, cos_theta > 0.0);
 
-    return max(0.0, AMPLITUDE * spectrum_k * directional);
+    return max(0.0, params.amplitude * spectrum_k * directional);
 }
 
 // Map (row, col) integer indices to (kx, kz) for a given patch length,

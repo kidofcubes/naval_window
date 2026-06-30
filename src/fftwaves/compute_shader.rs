@@ -12,7 +12,8 @@ use bevy::render::texture::GpuImage;
 use strum::AsRefStr;
 
 use crate::fftwaves::{
-    FftCascadesUniform, FftSettings, FftTexture, FftTextures,
+    FftCascadesUniform, FftSettings, FftSpectrumParams,
+    FftTexture, FftTextures,
     FFT_CASCADE_COUNT, FFT_GRID_SIZE, FFT_SPECTRUM_COUNT,
 };
 use crate::watering::shader_utils::encode_uniform;
@@ -37,6 +38,7 @@ impl FftPasses {
 pub enum FftBuffers {
     Settings,
     Cascades,
+    Spectrum,
 }
 
 #[derive(Resource)]
@@ -77,6 +79,7 @@ impl FromWorld for FftPipelines {
             texture_storage_2d_array(TextureFormat::Rg32Float, StorageTextureAccess::WriteOnly),
             texture_storage_2d_array(TextureFormat::R32Float,  StorageTextureAccess::WriteOnly),
             uniform_buffer::<FftCascadesUniform>(false),
+            uniform_buffer::<FftSpectrumParams>(false),
         ));
 
         fft_pipeline!(passes, FftPasses::FftEvolveSpectrum, asset_server, pipeline_cache, (
@@ -134,6 +137,7 @@ pub fn queue_bind_groups(
     pipelines:        Res<FftPipelines>,
     settings:         Res<FftSettings>,
     cascades:         Res<FftCascadesUniform>,
+    spectrum:         Res<FftSpectrumParams>,
     existing_bgs:     Option<ResMut<FftBindGroups>>,
     textures:         Res<FftTextures>,
     render_images:    Res<RenderAssets<GpuImage>>,
@@ -154,6 +158,7 @@ pub fn queue_bind_groups(
     let buffers: HashMap<FftBuffers, Buffer> = if let Some(bgs) = existing_bgs {
         queue.write_buffer(&bgs.buffers[&FftBuffers::Settings], 0, &encode_uniform(&*settings));
         queue.write_buffer(&bgs.buffers[&FftBuffers::Cascades], 0, &encode_uniform(&*cascades));
+        queue.write_buffer(&bgs.buffers[&FftBuffers::Spectrum], 0, &encode_uniform(&*spectrum));
         bgs.buffers.clone()
     } else {
         let mut bufs = HashMap::new();
@@ -164,6 +169,7 @@ pub fn queue_bind_groups(
         });
         bufs.insert(FftBuffers::Settings, mk("fft_settings", encode_uniform(&*settings)));
         bufs.insert(FftBuffers::Cascades, mk("fft_cascades", encode_uniform(&*cascades)));
+        bufs.insert(FftBuffers::Spectrum, mk("fft_spectrum", encode_uniform(&*spectrum)));
         bufs
     };
 
@@ -173,6 +179,7 @@ pub fn queue_bind_groups(
 
     let settings_buf = &buffers[&FftBuffers::Settings];
     let cascades_buf = &buffers[&FftBuffers::Cascades];
+    let spectrum_buf = &buffers[&FftBuffers::Spectrum];
 
     let mut bind_groups = HashMap::new();
 
@@ -184,6 +191,7 @@ pub fn queue_bind_groups(
             &h0c.texture_view,
             &omega.texture_view,
             cascades_buf.as_entire_binding(),
+            spectrum_buf.as_entire_binding(),
         )),
     ));
 
@@ -243,17 +251,24 @@ fn butterfly_workgroups() -> (u32, u32, u32) {
 pub fn render_pass(
     world: &World,
     mut ctx: RenderContext,
-    mut init_done: Local<bool>,
+    mut last_init_signature: Local<Vec<u8>>,
 ) -> Result<()> {
     let pipeline_cache = world.resource::<PipelineCache>();
     let pipelines      = world.resource::<FftPipelines>();
     let Some(bgs)      = world.get_resource::<FftBindGroups>() else { return Ok(()) };
 
+    // Re-run InitSpectrum whenever the JONSWAP params or cascade bands change.
+    let spectrum = world.resource::<FftSpectrumParams>();
+    let cascades = world.resource::<FftCascadesUniform>();
+    let mut signature = encode_uniform(spectrum);
+    signature.extend_from_slice(&encode_uniform(cascades));
+    let needs_init = signature != *last_init_signature;
+
     let wg_cell = cell_workgroups();
     let wg_bfly = butterfly_workgroups();
 
     let mut passes_to_run: Vec<(FftPasses, (u32, u32, u32))> = Vec::with_capacity(5);
-    if !*init_done {
+    if needs_init {
         passes_to_run.push((FftPasses::FftInitSpectrum, wg_cell));
     }
     passes_to_run.push((FftPasses::FftEvolveSpectrum, wg_cell));
@@ -281,8 +296,8 @@ pub fn render_pass(
         pass.dispatch_workgroups(wg.0, wg.1, wg.2);
     }
 
-    if !*init_done {
-        *init_done = true;
+    if needs_init {
+        *last_init_signature = signature;
     }
 
     Ok(())

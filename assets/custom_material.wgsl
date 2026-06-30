@@ -19,7 +19,7 @@
 #import "water_common.wgsl"::{
     GRID_X_SIZE, GRID_Z_SIZE, GRID_SCALE, RENDER_X_SIZE, RENDER_Z_SIZE,
     DIRECTIONS, TOTAL_ZETA_NUMBERS, PROFILE_BUFFER_LENGTH,
-    PERIODICITY, ZETA_MIN, ZETA_MAX, DIRECTIONAL_OFFSETS,
+    PERIODICITY, DIRECTIONAL_OFFSETS,
     GRAVITY, TIME_MULT, TAU, WaterSettings, WaterDebugSettings, VoxelSettings, WaterWaveGroupSpeeds,
     index_to_radians, layer_index
 }
@@ -65,6 +65,7 @@ const FFT_CASCADE_COUNT: u32 = 4u;
 @group(#{MATERIAL_BIND_GROUP}) @binding(114) var fft_sampler:      sampler;
 // xyzw per cascade = (patch_length, k_min, k_max, _pad)
 @group(#{MATERIAL_BIND_GROUP}) @binding(115) var<uniform> fft_cascade_params: array<vec4<f32>, FFT_CASCADE_COUNT>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(116) var<uniform> settings: WaterSettings;
 
 
 fn modulo_f32(x: f32, n: f32) -> f32{
@@ -145,10 +146,10 @@ fn calculate_water_surface(uv: vec2<f32>) -> WaterSurface {
     var tz = vec3<f32>(0.0, 0.0, 0.0);
 
     let direction_multiplier = 1.0 / f32(DIRECTIONS);
-    let zeta_full_range = ZETA_MAX - ZETA_MIN;
+    let zeta_full_range = settings.zeta_max - settings.zeta_min;
 
     for (var zeta_index: u32 = 0u; zeta_index < TOTAL_ZETA_NUMBERS; zeta_index++) {
-        let mid_zeta = ZETA_MIN + (zeta_full_range * ((f32(zeta_index) + 0.5) / f32(TOTAL_ZETA_NUMBERS)));
+        let mid_zeta = settings.zeta_min + (zeta_full_range * ((f32(zeta_index) + 0.5) / f32(TOTAL_ZETA_NUMBERS)));
         let period: f32 = f32(PERIODICITY) * pow(2.0, mid_zeta);
 
         for (var theta_index: u32 = 0u; theta_index < DIRECTIONS; theta_index++) {

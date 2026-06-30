@@ -5,6 +5,7 @@ mod watering;
 mod fftwaves;
 mod mesh_optimize;
 mod big_watering;
+mod tuning_ui;
 mod utils;
 
 use bevy::{color::Color, pbr::wireframe::{WireframeConfig, WireframePlugin}, prelude::*, render::{settings::{RenderCreation, WgpuFeatures, WgpuLimits, WgpuSettings}, RenderPlugin}, window::WindowResolution};
@@ -29,7 +30,9 @@ use crate::cam_movement::CameraMovementPlugin;
 use crate::mesh_optimize::{combine_meshes, get_boundary_mesh_conservative, simplify_mesh};
 use crate::big_watering::BigWatering;
 use crate::fftwaves::FftWavesPlugin;
+use crate::tuning_ui::TuningUiPlugin;
 use crate::water::{CustomMaterial, WaterPlugin};
+use bevy_egui::EguiPlugin;
 
 
 
@@ -468,8 +471,10 @@ fn main() {
                 init_paths: data_paths.unwrap(),
             },
             WireframePlugin::default(),
+            EguiPlugin { enable_multipass_for_primary_context: true, ..default() },
             FftWavesPlugin,
             WaterPlugin,
+            TuningUiPlugin,
             CameraMovementPlugin,
             MeshPickingPlugin,
             // BigWatering,

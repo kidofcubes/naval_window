@@ -3,7 +3,7 @@
 
 #import "fftwaves/fft_common.wgsl"::{
     FFT_GRID_SIZE, FFT_CASCADE_COUNT, GRAVITY, TAU,
-    FftCascadeBuffer,
+    FftCascadeBuffer, FftSpectrumParams,
     jonswap_spectrum, gaussian2, k_for_cell, hash3, cconj,
 }
 
@@ -11,6 +11,7 @@
 @group(0) @binding(1) var h0_conj_out: texture_storage_2d_array<rg32float, write>;
 @group(0) @binding(2) var omega_out:   texture_storage_2d_array<r32float,  write>;
 @group(0) @binding(3) var<uniform> cascades: FftCascadeBuffer;
+@group(0) @binding(4) var<uniform> spectrum: FftSpectrumParams;
 
 // PRNG seed mixing prime; arbitrary fixed value picks a particular ocean realization.
 const FFT_PRNG_SALT: u32 = 0xC0FFEE17u;
@@ -26,7 +27,7 @@ fn sample_h0(row: u32, col: u32, cascade: u32) -> vec2<f32> {
     if (k_len < k_min || k_len > k_max) {
         return vec2<f32>(0.0, 0.0);
     }
-    let s = jonswap_spectrum(k.x, k.y);
+    let s = jonswap_spectrum(k.x, k.y, spectrum);
     let scale = sqrt(s) * 0.7071067811865475; // 1/sqrt(2)
 
     let noise = gaussian2(

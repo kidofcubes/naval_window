@@ -12,7 +12,7 @@ use bevy::shader::{ShaderDefVal, ShaderRef};
 use rand::{random, random_bool, random_range};
 use crate::{watering, BuildData};
 use crate::voxelize::{create_voxel_texture, null_texture, VoxelGrid};
-use crate::watering::{VoxelSettings, Watering, WaterPingPong, GpuTexture, GpuTextures};
+use crate::watering::{VoxelSettings, Watering, WaterPingPong, GpuTexture, GpuTextures, WaterSettings};
 use crate::watering::water_lod::WaterLodPlugin;
 use crate::fftwaves::{FftCascadesUniform, FftTexture, FftTextures, FFT_CASCADE_COUNT};
 
@@ -48,6 +48,7 @@ fn setup(
     water_textures: Res<GpuTextures>,
     fft_textures: Res<FftTextures>,
     fft_cascades: Res<FftCascadesUniform>,
+    water_settings: Res<WaterSettings>,
     asset_server: Res<AssetServer>,
 ) {
     println!("SETUPING");
@@ -100,6 +101,7 @@ fn setup(
         fft_displacement: fft_textures.get(FftTexture::Displacement).cloned().expect("Fft Displacement texture not initialized"),
         fft_slope: fft_textures.get(FftTexture::Slope).cloned().expect("Fft Slope texture not initialized"),
         fft_cascade_params: fft_cascades.cascades,
+        water_settings: water_settings.clone(),
     };
 
     let material = ExtendedMaterial {
@@ -141,6 +143,8 @@ fn update(
     mut ping_pong: ResMut<WaterPingPong>,
     time: Res<Time>,
     mut gizmo: Gizmos,
+    water_settings: Res<WaterSettings>,
+    fft_cascades: Res<FftCascadesUniform>,
 ){
     ping_pong.flipped = !ping_pong.flipped;
     let current_amp_key = if ping_pong.flipped { GpuTexture::AmplitudeB } else { GpuTexture::AmplitudeA };
@@ -151,6 +155,8 @@ fn update(
             update_material(&mut material.extension, voxel_grid, &mut images)
         }
         material.extension.amplitude_texture = amp_handle.clone();
+        material.extension.water_settings = water_settings.clone();
+        material.extension.fft_cascade_params = fft_cascades.cascades;
     }
     // if let Some(voxel_grid) = build_data.voxel_grid.as_ref() && key.just_pressed(KeyCode::KeyG) {
     //     voxel_grid_handle.0 = create_voxel_texture(voxel_grid,&mut images);
@@ -200,6 +206,9 @@ pub struct CustomMaterial {
 
     #[uniform(115)]
     fft_cascade_params: [Vec4; FFT_CASCADE_COUNT],
+
+    #[uniform(116)]
+    water_settings: WaterSettings,
 }
 
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.
